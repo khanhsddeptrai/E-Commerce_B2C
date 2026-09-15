@@ -1,0 +1,13 @@
+{
+  "name": "@repo/proto",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "rxjs": "^7.8.1"
+  }
+}

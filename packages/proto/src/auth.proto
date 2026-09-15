@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package auth;
+
+service AuthService {
+  rpc Register (RegisterRequest) returns (AuthResponse);
+  rpc Login (LoginRequest) returns (AuthResponse);
+  rpc RefreshToken (RefreshTokenRequest) returns (TokenResponse);
+  rpc ValidateToken (ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc GetProfile (GetProfileRequest) returns (UserProfileResponse);
+}
+
+message UserDto {
+  string id = 1;
+  string email = 2;
+  string full_name = 3;
+  optional string phone = 4;
+  optional string avatar_url = 5;
+  string role = 6;
+  string status = 7;
+  string created_at = 8;
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string full_name = 3;
+  optional string phone = 4;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+  optional string device_info = 3;
+}
+
+message AuthResponse {
+  UserDto user = 1;
+  string access_token = 2;
+  string refresh_token = 3;
+  int64 expires_in = 4;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message TokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+message ValidateTokenRequest {
+  string access_token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string email = 3;
+  string role = 4;
+  optional string error = 5;
+}
+
+message GetProfileRequest {
+  string user_id = 1;
+}
+
+message UserProfileResponse {
+  UserDto user = 1;
+}

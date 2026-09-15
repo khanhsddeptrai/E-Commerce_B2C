@@ -7,12 +7,12 @@
 ## Giai Đoạn 1: Khởi Tạo Nền Tảng (Foundation & Infrastructure)
 * **Mục tiêu**: Thiết lập bộ khung Monorepo, container hạ tầng và kênh liên lạc gRPC đầu tiên.
 * **Các công việc cụ thể**:
-  - [ ] Khởi tạo Monorepo bằng **Turborepo** với cấu trúc `apps/` và `packages/`.
-  - [ ] Viết file `docker/docker-compose.yml` chạy các dịch vụ: PostgreSQL (kèm PgBouncer), Redis Cluster, RabbitMQ, MongoDB, Meilisearch.
-  - [ ] Thiết lập `packages/proto`: Định nghĩa file `.proto` đầu tiên và viết script sinh code TypeScript.
-  - [ ] Thiết lập `packages/database`: Cấu hình Prisma schema và migration cho `auth_db`.
-  - [ ] Xây dựng **Auth Service**: Đăng ký, đăng nhập, JWT authentication, cấp refresh token.
-  - [ ] Xây dựng **API Gateway (BFF)**: Cấu hình Ingress, routing gRPC sang Auth Service, Auth Guard.
+  - [x] Khởi tạo Monorepo bằng **Turborepo** với cấu trúc `apps/` và `packages/`.
+  - [x] Viết file `docker/docker-compose.yml` chạy các dịch vụ: PostgreSQL (kèm PgBouncer), Redis Cluster, RabbitMQ, MongoDB, Meilisearch.
+  - [x] Thiết lập `packages/proto`: Định nghĩa file `.proto` đầu tiên và viết script sinh code TypeScript.
+  - [x] Thiết lập `packages/database`: Cấu hình Prisma schema và migration cho `auth_db`.
+  - [x] Xây dựng **Auth Service**: Đăng ký, đăng nhập, JWT authentication, cấp refresh token.
+  - [x] Xây dựng **API Gateway (BFF)**: Cấu hình Ingress, routing gRPC sang Auth Service, Auth Guard.
 
 ---
 

@@ -1,0 +1,70 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("AUTH_DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  CUSTOMER
+  ADMIN
+  SUPPORT
+}
+
+enum Status {
+  ACTIVE
+  SUSPENDED
+  PENDING_VERIFY
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique @db.VarChar(255)
+  passwordHash String        @map("password_hash") @db.VarChar(255)
+  fullName     String        @map("full_name") @db.VarChar(150)
+  phone        String?       @db.VarChar(20)
+  avatarUrl    String?       @map("avatar_url") @db.Text
+  role         Role          @default(CUSTOMER)
+  status       Status        @default(ACTIVE)
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+
+  addresses    UserAddress[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model UserAddress {
+  id            String   @id @default(uuid()) @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  receiverName  String   @map("receiver_name") @db.VarChar(150)
+  receiverPhone String   @map("receiver_phone") @db.VarChar(20)
+  province      String   @db.VarChar(100)
+  district      String   @db.VarChar(100)
+  ward          String   @db.VarChar(100)
+  streetAddress String   @map("street_address") @db.VarChar(255)
+  isDefault     Boolean  @default(false) @map("is_default")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@map("user_addresses")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(255)
+  deviceInfo String?   @map("device_info") @db.VarChar(255)
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}

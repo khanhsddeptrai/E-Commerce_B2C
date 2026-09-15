@@ -1,0 +1,16 @@
+{
+  "name": "e-commerce-b2c",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@12.4.1",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "proto:generate": "turbo run proto:generate",
+    "db:generate": "turbo run db:generate"
+  },
+  "devDependencies": {
+    "turbo": "^2.1.0"
+  }
+}

@@ -1,0 +1,85 @@
+services:
+  # 1. Primary Relational Databases (PostgreSQL)
+  postgres:
+    image: postgres:16-alpine
+    container_name: b2c-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 2. In-Memory Cache, Session & Distributed Locks (Redis)
+  redis:
+    image: redis:7-alpine
+    container_name: b2c-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # 3. Message Broker & Event Bus (RabbitMQ)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: b2c-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    ports:
+      - "5672:5672"     # AMQP protocol
+      - "15672:15672"   # Management Web UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+  # 4. NoSQL Database for Customer Support Chat & Messages (MongoDB)
+  mongo:
+    image: mongo:7.0
+    container_name: b2c-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  # 5. Instant Full-Text Search Engine (Meilisearch)
+  meilisearch:
+    image: getmeili/meilisearch:v1.6
+    container_name: b2c-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: novatech_master_key_123
+      MEILI_ENV: development
+    ports:
+      - "7700:7700"
+    volumes:
+      - meili_data:/meili_data
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+  mongo_data:
+  meili_data:
