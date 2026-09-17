@@ -1,3 +1,4 @@
+name: b2c-ecommerce
 services:
   # 1. Primary Relational Databases (PostgreSQL)
   postgres:

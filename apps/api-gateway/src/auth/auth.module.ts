@@ -14,6 +14,9 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
           package: AUTH_PACKAGE_NAME,
           protoPath: AUTH_PROTO_PATH,
           url: process.env.AUTH_GRPC_URL || 'localhost:50051',
+          loader: {
+            keepCase: true,
+          },
         },
       },
     ]),

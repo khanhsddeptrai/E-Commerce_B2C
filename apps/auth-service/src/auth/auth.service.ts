@@ -1,4 +1,6 @@
-import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
+import { RpcException } from '@nestjs/microservices';
+import { status } from '@grpc/grpc-js';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
@@ -23,12 +25,31 @@ export class AuthService {
   ) {}
 
   async register(data: RegisterRequest): Promise<AuthResponse> {
+    const email = data.email?.toLowerCase()?.trim();
+    if (!email) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Email không được để trống',
+      });
+    }
+
     const existing = await this.prisma.user.findUnique({
-      where: { email: data.email.toLowerCase().trim() },
+      where: { email },
     });
 
     if (existing) {
-      throw new ConflictException('Email đã được sử dụng');
+      throw new RpcException({
+        code: status.ALREADY_EXISTS,
+        message: 'Email đã được sử dụng',
+      });
+    }
+
+    const fullName = data.full_name || (data as any).fullName;
+    if (!fullName) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Họ tên không được để trống',
+      });
     }
 
     const salt = await bcrypt.genSalt(10);
@@ -36,9 +57,9 @@ export class AuthService {
 
     const user = await this.prisma.user.create({
       data: {
-        email: data.email.toLowerCase().trim(),
+        email,
         passwordHash,
-        fullName: data.full_name,
+        fullName,
         phone: data.phone || null,
         role: 'CUSTOMER',
         status: 'ACTIVE',
@@ -65,24 +86,35 @@ export class AuthService {
   }
 
   async login(data: LoginRequest): Promise<AuthResponse> {
+    const email = data.email?.toLowerCase()?.trim();
     const user = await this.prisma.user.findUnique({
-      where: { email: data.email.toLowerCase().trim() },
+      where: { email },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Email hoặc mật khẩu không chính xác');
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Email hoặc mật khẩu không chính xác',
+      });
     }
 
     const isMatch = await bcrypt.compare(data.password, user.passwordHash);
     if (!isMatch) {
-      throw new UnauthorizedException('Email hoặc mật khẩu không chính xác');
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Email hoặc mật khẩu không chính xác',
+      });
     }
 
     if (user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('Tài khoản đã bị tạm khóa hoặc chưa kích hoạt');
+      throw new RpcException({
+        code: status.PERMISSION_DENIED,
+        message: 'Tài khoản đã bị tạm khóa hoặc chưa kích hoạt',
+      });
     }
 
-    const tokens = await this.generateTokens(user.id, user.email, user.role, data.device_info);
+    const deviceInfo = data.device_info || (data as any).deviceInfo;
+    const tokens = await this.generateTokens(user.id, user.email, user.role, deviceInfo);
 
     return {
       user: {
@@ -102,7 +134,15 @@ export class AuthService {
   }
 
   async refreshToken(data: RefreshTokenRequest): Promise<TokenResponse> {
-    const hash = crypto.createHash('sha256').update(data.refresh_token).digest('hex');
+    const rawToken = data.refresh_token || (data as any).refreshToken;
+    if (!rawToken) {
+      throw new RpcException({
+        code: status.INVALID_ARGUMENT,
+        message: 'Refresh token không được để trống',
+      });
+    }
+
+    const hash = crypto.createHash('sha256').update(rawToken).digest('hex');
 
     const storedToken = await this.prisma.refreshToken.findUnique({
       where: { tokenHash: hash },
@@ -110,7 +150,10 @@ export class AuthService {
     });
 
     if (!storedToken || storedToken.revokedAt || storedToken.expiresAt < new Date()) {
-      throw new UnauthorizedException('Refresh Token không hợp lệ hoặc đã hết hạn');
+      throw new RpcException({
+        code: status.UNAUTHENTICATED,
+        message: 'Refresh Token không hợp lệ hoặc đã hết hạn',
+      });
     }
 
     // Revoke previous refresh token
@@ -136,7 +179,8 @@ export class AuthService {
 
   async validateToken(data: ValidateTokenRequest): Promise<ValidateTokenResponse> {
     try {
-      const payload = this.jwtService.verify(data.access_token);
+      const token = data.access_token || (data as any).accessToken;
+      const payload = this.jwtService.verify(token);
       return {
         valid: true,
         user_id: payload.sub,
@@ -155,12 +199,16 @@ export class AuthService {
   }
 
   async getProfile(data: GetProfileRequest): Promise<UserProfileResponse> {
+    const userId = data.user_id || (data as any).userId;
     const user = await this.prisma.user.findUnique({
-      where: { id: data.user_id },
+      where: { id: userId },
     });
 
     if (!user) {
-      throw new NotFoundException('Người dùng không tồn tại');
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: 'Người dùng không tồn tại',
+      });
     }
 
     return {

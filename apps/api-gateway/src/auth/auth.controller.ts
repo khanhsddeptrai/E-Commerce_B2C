@@ -27,14 +27,19 @@ export class AuthController implements OnModuleInit {
 
   @Post('register')
   async register(@Body() dto: RegisterDto) {
-    return firstValueFrom(
-      this.authServiceClient.register({
-        email: dto.email,
-        password: dto.password,
-        full_name: dto.full_name,
-        phone: dto.phone,
-      }),
-    );
+    try {
+      return await firstValueFrom(
+        this.authServiceClient.register({
+          email: dto.email,
+          password: dto.password,
+          full_name: dto.full_name,
+          phone: dto.phone,
+        }),
+      );
+    } catch (err: any) {
+      console.error('>>> [API Gateway /register] Error:', err);
+      throw err;
+    }
   }
 
   @Post('login')

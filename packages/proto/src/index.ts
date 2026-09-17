@@ -1,7 +1,35 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import { Observable } from 'rxjs';
 
-export const AUTH_PROTO_PATH = path.resolve(__dirname, '../src/auth.proto');
+function getProtoPath(filename: string): string {
+  let baseDir = '';
+  try {
+    // @ts-ignore
+    baseDir = __dirname;
+  } catch {
+    // @ts-ignore
+    baseDir = import.meta.dirname || '';
+  }
+
+  const candidates = [
+    path.resolve(baseDir, filename),
+    path.resolve(baseDir, '../src', filename),
+    path.resolve(process.cwd(), 'packages/proto/src', filename),
+    path.resolve(process.cwd(), '../packages/proto/src', filename),
+    path.resolve(process.cwd(), '../../packages/proto/src', filename),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[0];
+}
+
+export const AUTH_PROTO_PATH = getProtoPath('auth.proto');
 export const AUTH_PACKAGE_NAME = 'auth';
 
 export interface UserDto {

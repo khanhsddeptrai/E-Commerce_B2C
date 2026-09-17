@@ -1,3 +1,21 @@
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+import * as fs from 'fs';
+
+// Nạp cấu hình biến môi trường từ root .env hoặc local .env
+const envCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), '../../.env'),
+  path.resolve(__dirname, '../.env'),
+  path.resolve(__dirname, '../../.env'),
+];
+for (const envFile of envCandidates) {
+  if (fs.existsSync(envFile)) {
+    dotenv.config({ path: envFile });
+  }
+}
+dotenv.config();
+
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
@@ -13,6 +31,9 @@ async function bootstrap() {
       package: AUTH_PACKAGE_NAME,
       protoPath: AUTH_PROTO_PATH,
       url: `${host}:${port}`,
+      loader: {
+        keepCase: true,
+      },
     },
   });
 
@@ -21,3 +42,4 @@ async function bootstrap() {
 }
 
 bootstrap();
+
