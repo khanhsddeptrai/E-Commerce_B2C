@@ -133,6 +133,7 @@ Toàn bộ thiết kế chi tiết được tổ chức thành các tài liệu 
 3. ⚡ **[03. Các Mẫu Thiết Kế Phân Tán (Distributed Patterns)](docs/03-distributed-patterns.md)**: Sơ đồ SAGA Orchestration, giải thuật chống bán lố Flash Sale (Lua Script), Transactional Outbox và Idempotency Key.
 4. 🎨 **[04. Thiết Kế Giao Diện & Design System (Frontend)](docs/04-frontend-design-system.md)**: Phân tách triết lý Storefront vs Admin, hệ thống Design Tokens màu sắc, typography và thư viện `@repo/ui`.
 5. 🚀 **[05. Lộ Trình Triển Khai (Roadmap & Milestones)](docs/05-roadmap.md)**: Kế hoạch phát triển 5 giai đoạn từ lúc khởi tạo Monorepo đến khi hoàn thiện sản phẩm.
+6. 🛠️ **[06. Sổ Tay Chẩn Đoán & Khắc Phục Sự Cố (Troubleshooting Hub)](docs/troubleshooting/README.md)**: Hệ thống tài liệu phân loại chi tiết các sự cố kỹ thuật (Cổng mạng, gRPC keepCase, Biến môi trường, Monorepo Scripts, Docker và GUI).
 
 ---
 
