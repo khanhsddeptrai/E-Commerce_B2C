@@ -13,11 +13,13 @@ import {
   Check,
   ChevronRight,
   Cpu,
+  ZoomIn,
 } from "lucide-react";
 import { productService } from "@/services/productService";
 import { Product, ProductVariant } from "@/types/ecommerce";
 import { useCart } from "@/context/CartContext";
 import { ProductCard } from "@/components/ProductCard";
+import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -34,6 +36,8 @@ export default function ProductDetailPage() {
   const [activeImage, setActiveImage] = useState<string>("");
   const [quantity, setQuantity] = useState(1);
   const [isAddedToast, setIsAddedToast] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -168,17 +172,30 @@ export default function ProductDetailPage() {
         {/* Left: Interactive Image Gallery (Col 7) */}
         <div className="lg:col-span-7 space-y-4">
           {/* Main Large Image */}
-          <div className="relative aspect-square sm:aspect-[4/3] rounded-3xl overflow-hidden bg-white border border-slate-200/80 shadow-sm flex items-center justify-center group">
+          <div
+            onClick={() => {
+              const idx = product.images.findIndex((img) => img === activeImage);
+              setPreviewIndex(idx >= 0 ? idx : 0);
+              setIsPreviewOpen(true);
+            }}
+            className="relative aspect-square sm:aspect-[4/3] rounded-3xl overflow-hidden bg-white border border-slate-200/80 shadow-sm flex items-center justify-center group cursor-pointer"
+            title="Nhấn để xem trước ảnh phóng to"
+          >
             <img
               src={activeImage || product.images[0]}
               alt={product.name}
-              className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
+              className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 cursor-pointer"
             />
             {product.badge && (
-              <span className="absolute top-4 left-4 bg-slate-900 text-white text-[11px] font-bold tracking-wider uppercase px-3 py-1 rounded-full shadow-md">
+              <span className="absolute top-4 left-4 bg-slate-900 text-white text-[11px] font-bold tracking-wider uppercase px-3 py-1 rounded-full shadow-md pointer-events-none">
                 {product.badge}
               </span>
             )}
+            {/* Hover Zoom pill badge */}
+            <div className="absolute bottom-4 right-4 bg-slate-950/75 backdrop-blur-md border border-slate-700/80 text-white text-xs font-semibold px-3 py-1.5 rounded-xl opacity-0 group-hover:opacity-100 transition-all flex items-center gap-1.5 shadow-lg pointer-events-none">
+              <ZoomIn className="w-3.5 h-3.5" />
+              <span>Xem trước ảnh</span>
+            </div>
           </div>
 
           {/* Thumbnails switcher */}
@@ -188,7 +205,7 @@ export default function ProductDetailPage() {
                 <button
                   key={idx}
                   onClick={() => setActiveImage(img)}
-                  className={`relative w-20 h-20 rounded-2xl overflow-hidden bg-white border-2 transition-all shrink-0 ${
+                  className={`relative w-20 h-20 rounded-2xl overflow-hidden bg-white border-2 transition-all shrink-0 cursor-pointer ${
                     activeImage === img
                       ? "border-indigo-600 ring-2 ring-indigo-600/20 scale-105"
                       : "border-slate-200 hover:border-slate-300"
@@ -270,7 +287,7 @@ export default function ProductDetailPage() {
                     <button
                       key={v.id}
                       onClick={() => handleVariantChange(idx)}
-                      className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                      className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between cursor-pointer ${
                         selectedVariantIndex === idx
                           ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600"
                           : "border-slate-200 hover:border-slate-300 bg-white"
@@ -297,7 +314,7 @@ export default function ProductDetailPage() {
                 <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-white">
                   <button
                     onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                    className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold"
+                    className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold cursor-pointer"
                     aria-label="Giảm"
                   >
                     -
@@ -307,7 +324,7 @@ export default function ProductDetailPage() {
                   </span>
                   <button
                     onClick={() => setQuantity((q) => Math.min(activeVariant?.stock || 10, q + 1))}
-                    className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold"
+                    className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold cursor-pointer"
                     aria-label="Tăng"
                   >
                     +
@@ -325,7 +342,7 @@ export default function ProductDetailPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <button
                 onClick={handleAddToCart}
-                className="py-3.5 px-4 rounded-xl border-2 border-indigo-600 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                className="py-3.5 px-4 rounded-xl border-2 border-indigo-600 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer"
               >
                 {isAddedToast ? (
                   <>
@@ -342,7 +359,7 @@ export default function ProductDetailPage() {
 
               <button
                 onClick={handleBuyNow}
-                className="py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-indigo-600/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                className="py-3.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-indigo-600/25 flex items-center justify-center gap-2 transition-all active:scale-[0.98] cursor-pointer"
               >
                 <Zap className="w-4 h-4 fill-white" />
                 <span>Mua Ngay Giao 2H</span>
@@ -431,6 +448,15 @@ export default function ProductDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Full-Screen Image Preview Modal */}
+      <ImagePreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        images={product.images.length > 0 ? product.images : [activeImage]}
+        initialIndex={previewIndex}
+        productName={product.name}
+      />
     </div>
   );
 }

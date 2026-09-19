@@ -147,11 +147,13 @@ export default function HomePage() {
               <div className="relative mx-auto max-w-md lg:max-w-none">
                 <div className="aspect-square rounded-3xl overflow-hidden border border-slate-800/80 shadow-2xl relative group bg-gradient-to-b from-slate-900 to-slate-950">
                   {flagshipProduct?.images?.[0] ? (
-                    <img
-                      src={flagshipProduct.images[0]}
-                      alt={flagshipProduct.name}
-                      className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
-                    />
+                    <Link href={`/products/${flagshipProduct.slug}`} className="block w-full h-full cursor-pointer">
+                      <img
+                        src={flagshipProduct.images[0]}
+                        alt={flagshipProduct.name}
+                        className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700 cursor-pointer"
+                      />
+                    </Link>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-600">
                       <Cpu className="w-16 h-16 animate-pulse" />
@@ -267,11 +269,11 @@ export default function HomePage() {
               className="group relative bg-white rounded-2xl border border-slate-200/80 p-5 hover:border-indigo-400 hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 flex flex-col justify-between overflow-hidden"
             >
               <div>
-                <div className="aspect-[4/3] rounded-xl overflow-hidden mb-4 bg-slate-100">
+                <div className="aspect-[4/3] rounded-xl overflow-hidden mb-4 bg-slate-100 cursor-pointer">
                   <img
                     src={cat.featuredImage}
                     alt={cat.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 cursor-pointer"
                   />
                 </div>
                 <div className="flex items-center justify-between gap-2">

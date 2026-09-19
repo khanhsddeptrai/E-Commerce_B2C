@@ -2,9 +2,10 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { Star, ShoppingBag, Check, Zap } from "lucide-react";
+import { Star, ShoppingBag, Check, Zap, Eye } from "lucide-react";
 import { Product } from "@/types/ecommerce";
 import { useCart } from "@/context/CartContext";
+import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 
 interface ProductCardProps {
   product: Product;
@@ -14,6 +15,7 @@ export function ProductCard({ product }: ProductCardProps) {
   const { addToCart } = useCart();
   const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
   const [isAdded, setIsAdded] = useState(false);
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
 
   const activeVariant = product.variants[selectedVariantIndex] || product.variants[0];
   const displayImage = activeVariant?.image || product.images[0];
@@ -48,7 +50,7 @@ export function ProductCard({ product }: ProductCardProps) {
   return (
     <div className="group relative bg-white rounded-2xl border border-slate-200/80 hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-500/5 transition-all duration-300 flex flex-col overflow-hidden">
       {/* Product Image Area */}
-      <Link href={`/products/${product.slug}`} className="relative block aspect-square overflow-hidden bg-slate-50">
+      <Link href={`/products/${product.slug}`} className="relative block aspect-square overflow-hidden bg-slate-50 cursor-pointer">
         <img
           src={imgSrc}
           alt={product.name}
@@ -57,7 +59,7 @@ export function ProductCard({ product }: ProductCardProps) {
               "https://images.unsplash.com/photo-1550009158-9ebf69173e03?w=1000&auto=format&fit=crop&q=85"
             )
           }
-          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
+          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500 cursor-pointer"
           loading="lazy"
         />
 
@@ -90,6 +92,20 @@ export function ProductCard({ product }: ProductCardProps) {
             Chỉ còn {activeVariant.stock} sản phẩm
           </div>
         )}
+
+        {/* Quick Image Preview Button */}
+        <button
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setIsPreviewOpen(true);
+          }}
+          className="absolute top-3 right-3 z-10 p-2 rounded-full bg-slate-950/75 hover:bg-indigo-600 text-white backdrop-blur-md opacity-0 group-hover:opacity-100 transition-all shadow-md cursor-pointer hover:scale-110"
+          title="Xem trước ảnh"
+          aria-label="Xem trước ảnh"
+        >
+          <Eye className="w-3.5 h-3.5" />
+        </button>
       </Link>
 
       {/* Content Area */}
@@ -125,7 +141,7 @@ export function ProductCard({ product }: ProductCardProps) {
                       e.stopPropagation();
                       setSelectedVariantIndex(idx);
                     }}
-                    className={`w-5 h-5 rounded-full border transition-all ${
+                    className={`w-5 h-5 rounded-full border transition-all cursor-pointer ${
                       selectedVariantIndex === idx
                         ? "ring-2 ring-indigo-600 ring-offset-1 scale-110 border-transparent"
                         : "border-slate-300 hover:scale-105"
@@ -163,11 +179,11 @@ export function ProductCard({ product }: ProductCardProps) {
           <button
             onClick={handleQuickAdd}
             disabled={activeVariant?.stock === 0}
-            className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all duration-200 ${
+            className={`px-3 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all duration-200 cursor-pointer ${
               isAdded
                 ? "bg-emerald-600 text-white shadow-sm"
                 : activeVariant?.stock === 0
-                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                ? "bg-slate-100 text-slate-400 !cursor-not-allowed"
                 : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm shadow-indigo-500/20 active:scale-95"
             }`}
             aria-label="Thêm vào giỏ hàng"
@@ -188,6 +204,14 @@ export function ProductCard({ product }: ProductCardProps) {
           </button>
         </div>
       </div>
+
+      {/* Image Preview Modal */}
+      <ImagePreviewModal
+        isOpen={isPreviewOpen}
+        onClose={() => setIsPreviewOpen(false)}
+        images={product.images.length > 0 ? product.images : [imgSrc]}
+        productName={product.name}
+      />
     </div>
   );
 }

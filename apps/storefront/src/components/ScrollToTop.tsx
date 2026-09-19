@@ -32,7 +32,7 @@ export function ScrollToTop() {
   return (
     <button
       onClick={scrollToTop}
-      className="fixed bottom-6 right-6 z-40 p-3 rounded-full bg-slate-900/90 hover:bg-indigo-600 text-white shadow-xl shadow-slate-950/25 border border-slate-700/60 backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95 flex items-center justify-center group animate-in fade-in zoom-in duration-200"
+      className="fixed bottom-6 right-6 z-40 p-3 rounded-full bg-slate-900/90 hover:bg-indigo-600 text-white shadow-xl shadow-slate-950/25 border border-slate-700/60 backdrop-blur-md transition-all duration-300 hover:scale-110 active:scale-95 flex items-center justify-center group animate-in fade-in zoom-in duration-200 cursor-pointer"
       aria-label="Cuộn lên đầu trang"
       title="Cuộn lên đầu trang"
     >
