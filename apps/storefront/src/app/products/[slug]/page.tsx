@@ -11,14 +11,10 @@ import {
   ShoppingBag,
   Zap,
   Check,
-  Share2,
-  Heart,
   ChevronRight,
   Cpu,
-  Layers,
-  ArrowRight,
 } from "lucide-react";
-import { MOCK_PRODUCTS } from "@/mock/products";
+import { productService } from "@/services/productService";
 import { Product, ProductVariant } from "@/types/ecommerce";
 import { useCart } from "@/context/CartContext";
 import { ProductCard } from "@/components/ProductCard";
@@ -29,21 +25,91 @@ export default function ProductDetailPage() {
   const { addToCart } = useCart();
 
   const slug = params.slug as string;
-  const product = MOCK_PRODUCTS.find((p) => p.slug === slug) || MOCK_PRODUCTS[0];
+
+  const [product, setProduct] = useState<Product | null>(null);
+  const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
-  const [activeImage, setActiveImage] = useState(product.images[0]);
+  const [activeImage, setActiveImage] = useState<string>("");
   const [quantity, setQuantity] = useState(1);
   const [isAddedToast, setIsAddedToast] = useState(false);
 
-  // Sync state if slug changes
   useEffect(() => {
-    setSelectedVariantIndex(0);
-    setActiveImage(product.images[0]);
-    setQuantity(1);
-  }, [slug, product]);
+    let mounted = true;
+    setIsLoading(true);
 
-  const activeVariant = product.variants[selectedVariantIndex] || product.variants[0];
+    productService
+      .getProductBySlug(slug)
+      .then((found) => {
+        if (!mounted) return;
+        if (found) {
+          setProduct(found);
+          setActiveImage(found.images[0] || "");
+          setSelectedVariantIndex(0);
+          setQuantity(1);
+
+          productService
+            .getRelatedProducts(found.id, found.categoryId, 3)
+            .then((related) => {
+              if (mounted) setRelatedProducts(related);
+            })
+            .catch(() => {});
+        } else {
+          setProduct(null);
+        }
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        console.error("Lỗi tải chi tiết sản phẩm:", err);
+        if (mounted) {
+          setProduct(null);
+          setIsLoading(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [slug]);
+
+  if (isLoading) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 space-y-8">
+        <div className="h-6 w-48 bg-slate-100 rounded-lg animate-pulse" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+          <div className="lg:col-span-7 aspect-[4/3] bg-slate-100 rounded-3xl animate-pulse" />
+          <div className="lg:col-span-5 space-y-4">
+            <div className="h-8 w-3/4 bg-slate-100 rounded-lg animate-pulse" />
+            <div className="h-4 w-full bg-slate-100 rounded-lg animate-pulse" />
+            <div className="h-16 w-full bg-slate-100 rounded-2xl animate-pulse" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!product) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center space-y-4">
+        <h1 className="text-2xl font-bold text-slate-800">Không tìm thấy sản phẩm</h1>
+        <p className="text-slate-500 text-sm">
+          Sản phẩm bạn đang tìm kiếm không tồn tại hoặc đã ngừng kinh doanh.
+        </p>
+        <div>
+          <Link
+            href="/products"
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors"
+          >
+            Khám phá thiết bị khác
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const activeVariant: ProductVariant | undefined =
+    product.variants[selectedVariantIndex] || product.variants[0];
 
   const handleVariantChange = (index: number) => {
     setSelectedVariantIndex(index);
@@ -71,10 +137,6 @@ export default function ProductDetailPage() {
       router.push("/checkout");
     }
   };
-
-  const relatedProducts = MOCK_PRODUCTS.filter(
-    (p) => p.id !== product.id && p.categoryId === product.categoryId
-  ).slice(0, 3);
 
   const displayPrice = activeVariant?.price || product.basePrice;
   const originalPrice = activeVariant?.originalPrice || product.originalPrice;
@@ -108,7 +170,7 @@ export default function ProductDetailPage() {
           {/* Main Large Image */}
           <div className="relative aspect-square sm:aspect-[4/3] rounded-3xl overflow-hidden bg-white border border-slate-200/80 shadow-sm flex items-center justify-center group">
             <img
-              src={activeImage}
+              src={activeImage || product.images[0]}
               alt={product.name}
               className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-500"
             />
@@ -120,21 +182,23 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Thumbnails switcher */}
-          <div className="flex items-center gap-3 overflow-x-auto pb-2">
-            {product.images.map((img, idx) => (
-              <button
-                key={idx}
-                onClick={() => setActiveImage(img)}
-                className={`relative w-20 h-20 rounded-2xl overflow-hidden bg-white border-2 transition-all shrink-0 ${
-                  activeImage === img
-                    ? "border-indigo-600 ring-2 ring-indigo-600/20 scale-105"
-                    : "border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <img src={img} alt="thumbnail" className="w-full h-full object-cover" />
-              </button>
-            ))}
-          </div>
+          {product.images.length > 1 && (
+            <div className="flex items-center gap-3 overflow-x-auto pb-2">
+              {product.images.map((img, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => setActiveImage(img)}
+                  className={`relative w-20 h-20 rounded-2xl overflow-hidden bg-white border-2 transition-all shrink-0 ${
+                    activeImage === img
+                      ? "border-indigo-600 ring-2 ring-indigo-600/20 scale-105"
+                      : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <img src={img} alt="thumbnail" className="w-full h-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right: Product Details & Buying Actions (Col 5) */}
@@ -144,7 +208,9 @@ export default function ProductDetailPage() {
               <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-lg">
                 {product.brand}
               </span>
-              <span className="text-xs text-slate-400">• SKU: {activeVariant?.sku}</span>
+              {activeVariant?.sku && (
+                <span className="text-xs text-slate-400">• SKU: {activeVariant.sku}</span>
+              )}
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight leading-tight">
@@ -192,65 +258,67 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Dynamic Variant Selector: Colors & Models */}
-          <div className="space-y-4">
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-2">
-                Tùy chọn phiên bản / Màu sắc:{" "}
-                <span className="text-indigo-600">{activeVariant?.colorName}</span>
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                {product.variants.map((v, idx) => (
-                  <button
-                    key={v.id}
-                    onClick={() => handleVariantChange(idx)}
-                    className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
-                      selectedVariantIndex === idx
-                        ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600"
-                        : "border-slate-200 hover:border-slate-300 bg-white"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      <span
-                        className="w-4 h-4 rounded-full border border-slate-300 shrink-0"
-                        style={{ backgroundColor: v.colorHex }}
-                      />
-                      <span className="text-xs font-bold text-slate-900 truncate">{v.name}</span>
-                    </div>
-                    <span className="text-[11px] font-semibold text-slate-600">
-                      {formatPrice(v.price)}
-                    </span>
-                  </button>
-                ))}
+          {product.variants.length > 0 && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-2">
+                  Tùy chọn phiên bản / Màu sắc:{" "}
+                  <span className="text-indigo-600">{activeVariant?.colorName}</span>
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {product.variants.map((v, idx) => (
+                    <button
+                      key={v.id}
+                      onClick={() => handleVariantChange(idx)}
+                      className={`p-2.5 rounded-xl border text-left transition-all relative flex flex-col justify-between ${
+                        selectedVariantIndex === idx
+                          ? "border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600"
+                          : "border-slate-200 hover:border-slate-300 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span
+                          className="w-4 h-4 rounded-full border border-slate-300 shrink-0"
+                          style={{ backgroundColor: v.colorHex }}
+                        />
+                        <span className="text-xs font-bold text-slate-900 truncate">{v.name}</span>
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-600">
+                        {formatPrice(v.price)}
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* Quantity Selector */}
-            <div className="flex items-center gap-4 pt-2">
-              <label className="text-xs font-bold text-slate-700">Số lượng:</label>
-              <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-white">
-                <button
-                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                  className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold"
-                  aria-label="Giảm"
-                >
-                  -
-                </button>
-                <span className="px-4 text-xs font-bold text-slate-900 min-w-[32px] text-center">
-                  {quantity}
+              {/* Quantity Selector */}
+              <div className="flex items-center gap-4 pt-2">
+                <label className="text-xs font-bold text-slate-700">Số lượng:</label>
+                <div className="flex items-center border border-slate-200 rounded-xl overflow-hidden bg-white">
+                  <button
+                    onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                    className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold"
+                    aria-label="Giảm"
+                  >
+                    -
+                  </button>
+                  <span className="px-4 text-xs font-bold text-slate-900 min-w-[32px] text-center">
+                    {quantity}
+                  </span>
+                  <button
+                    onClick={() => setQuantity((q) => Math.min(activeVariant?.stock || 10, q + 1))}
+                    className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold"
+                    aria-label="Tăng"
+                  >
+                    +
+                  </button>
+                </div>
+                <span className="text-xs text-slate-400">
+                  (Kho còn {activeVariant?.stock || 15} sản phẩm)
                 </span>
-                <button
-                  onClick={() => setQuantity((q) => Math.min(activeVariant?.stock || 10, q + 1))}
-                  className="px-3 py-2 text-slate-500 hover:bg-slate-100 font-bold"
-                  aria-label="Tăng"
-                >
-                  +
-                </button>
               </div>
-              <span className="text-xs text-slate-400">
-                (Kho còn {activeVariant?.stock || 15} sản phẩm)
-              </span>
             </div>
-          </div>
+          )}
 
           {/* Action Buttons: Add to Cart & Buy Now */}
           <div className="space-y-2.5 pt-2">

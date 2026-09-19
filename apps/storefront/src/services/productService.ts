@@ -1,92 +1,179 @@
 import { Product, Category, FilterState } from "@/types/ecommerce";
-import { MOCK_PRODUCTS } from "@/mock/products";
-import { MOCK_CATEGORIES } from "@/mock/categories";
 
-const SIMULATED_DELAY_MS = 150;
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "http://localhost:8000/api/v1";
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+function mapApiProductToProduct(api: any): Product {
+  return {
+    id: api.id,
+    slug: api.slug,
+    name: api.name,
+    tagline: api.tagline || "",
+    description: api.description,
+    categoryId: api.category_id || api.categoryId,
+    categoryName: api.category_name || api.categoryName || "",
+    brand: api.brand || "NOVA TECH",
+    badge: api.badge,
+    featured: Boolean(api.featured),
+    isFlashSale: Boolean(api.is_flash_sale ?? api.isFlashSale),
+    flashSaleSold: api.flash_sale_sold ?? api.flashSaleSold ?? 0,
+    flashSaleTotal: api.flash_sale_total ?? api.flashSaleTotal ?? 0,
+    basePrice: Number(api.base_price ?? api.basePrice),
+    originalPrice: api.original_price ?? api.originalPrice ? Number(api.original_price ?? api.originalPrice) : undefined,
+    rating: Number(api.rating),
+    reviewCount: Number(api.review_count ?? api.reviewCount ?? 0),
+    images: api.images || [],
+    specs: api.specs || [],
+    variants: (api.variants || []).map((v: any) => ({
+      id: v.id,
+      sku: v.sku_code || v.sku,
+      name: v.name,
+      colorName: v.color_name || v.colorName,
+      colorHex: v.color_hex || v.colorHex,
+      specs: typeof v.specs_json === "string" ? JSON.parse(v.specs_json || "{}") : v.specs || {},
+      price: Number(v.price),
+      originalPrice: v.original_price ?? v.originalPrice ? Number(v.original_price ?? v.originalPrice) : undefined,
+      stock: Number(v.stock_quantity ?? v.stock ?? 0),
+      image: v.image_url || v.image || "",
+    })),
+    createdAt: api.created_at || api.createdAt,
+  };
+}
+
+function mapApiCategoryToCategory(api: any): Category {
+  return {
+    id: api.id,
+    slug: api.slug,
+    name: api.name,
+    description: api.description || "",
+    icon: api.icon || "Package",
+    itemCount: Number(api.item_count ?? api.itemCount ?? 0),
+    featuredImage: api.image_url || api.featuredImage || "",
+  };
+}
 
 export const productService = {
   async getProducts(filters?: FilterState): Promise<{ products: Product[]; total: number }> {
-    await delay(SIMULATED_DELAY_MS);
+    try {
+      const params = new URLSearchParams();
+      if (filters?.category && filters.category !== "all") params.set("category", filters.category);
+      if (filters?.searchQuery?.trim()) params.set("search", filters.searchQuery.trim());
+      if (filters?.minPrice !== undefined) params.set("minPrice", String(filters.minPrice));
+      if (filters?.maxPrice !== undefined) params.set("maxPrice", String(filters.maxPrice));
+      if (filters?.sortBy) params.set("sortBy", filters.sortBy);
+      params.set("limit", "50");
 
-    let list = [...MOCK_PRODUCTS];
+      const res = await fetch(`${API_BASE_URL}/products?${params.toString()}`, {
+        next: { revalidate: 30 },
+      });
 
-    if (filters?.category) {
-      list = list.filter(
-        (p) => p.categoryId === filters.category || p.categoryName.toLowerCase().includes(filters.category!.toLowerCase())
-      );
-    }
-
-    if (filters?.searchQuery) {
-      const q = filters.searchQuery.toLowerCase().trim();
-      list = list.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.tagline.toLowerCase().includes(q) ||
-          p.categoryName.toLowerCase().includes(q) ||
-          p.brand.toLowerCase().includes(q)
-      );
-    }
-
-    if (filters?.minPrice !== undefined) {
-      list = list.filter((p) => p.basePrice >= filters.minPrice!);
-    }
-
-    if (filters?.maxPrice !== undefined) {
-      list = list.filter((p) => p.basePrice <= filters.maxPrice!);
-    }
-
-    if (filters?.sortBy) {
-      switch (filters.sortBy) {
-        case "price-asc":
-          list.sort((a, b) => a.basePrice - b.basePrice);
-          break;
-        case "price-desc":
-          list.sort((a, b) => b.basePrice - a.basePrice);
-          break;
-        case "rating":
-          list.sort((a, b) => b.rating - a.rating);
-          break;
-        case "newest":
-          list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-          break;
-        case "featured":
-        default:
-          list.sort((a, b) => (b.featured ? 1 : 0) - (a.featured ? 1 : 0));
-          break;
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.products)) {
+          return {
+            products: data.products.map(mapApiProductToProduct),
+            total: data.total || data.products.length,
+          };
+        }
       }
+    } catch (err) {
+      console.error("[productService.getProducts] Error fetching products:", err);
     }
 
     return {
-      products: list,
-      total: list.length,
+      products: [],
+      total: 0,
     };
   },
 
   async getProductBySlug(slug: string): Promise<Product | null> {
-    await delay(SIMULATED_DELAY_MS);
-    const item = MOCK_PRODUCTS.find((p) => p.slug === slug);
-    return item || null;
+    try {
+      const res = await fetch(`${API_BASE_URL}/products/${encodeURIComponent(slug)}`, {
+        next: { revalidate: 30 },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.id) {
+          return mapApiProductToProduct(data);
+        }
+      }
+    } catch (err) {
+      console.error("[productService.getProductBySlug] Error fetching product:", err);
+    }
+    return null;
   },
 
-  async getFeaturedProducts(): Promise<Product[]> {
-    await delay(SIMULATED_DELAY_MS);
-    return MOCK_PRODUCTS.filter((p) => p.featured);
+  async getFeaturedProducts(limit = 4): Promise<Product[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/products?featured=true&limit=${limit}`, {
+        next: { revalidate: 30 },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.products)) {
+          return data.products.map(mapApiProductToProduct);
+        }
+      }
+    } catch (err) {
+      console.error("[productService.getFeaturedProducts] Error:", err);
+    }
+    return [];
   },
 
   async getFlashSaleProducts(): Promise<Product[]> {
-    await delay(SIMULATED_DELAY_MS);
-    return MOCK_PRODUCTS.filter((p) => p.isFlashSale);
+    try {
+      const res = await fetch(`${API_BASE_URL}/products?flashSale=true`, {
+        next: { revalidate: 30 },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.products)) {
+          return data.products.map(mapApiProductToProduct);
+        }
+      }
+    } catch (err) {
+      console.error("[productService.getFlashSaleProducts] Error:", err);
+    }
+    return [];
   },
 
   async getCategories(): Promise<Category[]> {
-    await delay(SIMULATED_DELAY_MS);
-    return MOCK_CATEGORIES;
+    try {
+      const res = await fetch(`${API_BASE_URL}/categories`, {
+        next: { revalidate: 60 },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          return data.map(mapApiCategoryToCategory);
+        }
+      }
+    } catch (err) {
+      console.error("[productService.getCategories] Error:", err);
+    }
+    return [];
   },
 
   async getRelatedProducts(productId: string, categoryId: string, limit = 4): Promise<Product[]> {
-    await delay(SIMULATED_DELAY_MS);
-    return MOCK_PRODUCTS.filter((p) => p.id !== productId && p.categoryId === categoryId).slice(0, limit);
+    try {
+      const params = new URLSearchParams();
+      if (categoryId) params.set("category", categoryId);
+      params.set("limit", String(limit + 2));
+
+      const res = await fetch(`${API_BASE_URL}/products?${params.toString()}`, {
+        next: { revalidate: 30 },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && Array.isArray(data.products)) {
+          return data.products
+            .map(mapApiProductToProduct)
+            .filter((p: Product) => p.id !== productId)
+            .slice(0, limit);
+        }
+      }
+    } catch (err) {
+      console.error("[productService.getRelatedProducts] Error:", err);
+    }
+    return [];
   },
 };

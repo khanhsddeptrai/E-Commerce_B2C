@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ShoppingBag, Search, Menu, X, Cpu, Sparkles, ChevronRight } from "lucide-react";
 import { useCart } from "@/context/CartContext";
-import { MOCK_PRODUCTS } from "@/mock/products";
+import { productService } from "@/services/productService";
 import { Product } from "@/types/ecommerce";
 
 export function Navbar() {
@@ -29,15 +29,23 @@ export function Navbar() {
   // Handle live search suggestions
   useEffect(() => {
     if (searchQuery.trim().length >= 2) {
-      const q = searchQuery.toLowerCase();
-      const matched = MOCK_PRODUCTS.filter(
-        (p) =>
-          p.name.toLowerCase().includes(q) ||
-          p.tagline.toLowerCase().includes(q) ||
-          p.categoryName.toLowerCase().includes(q)
-      ).slice(0, 4);
-      setSearchResults(matched);
-      setIsSearchOpen(true);
+      let active = true;
+      const timeout = setTimeout(() => {
+        productService
+          .getProducts({ searchQuery: searchQuery.trim() })
+          .then((res) => {
+            if (active) {
+              setSearchResults(res.products.slice(0, 4));
+              setIsSearchOpen(true);
+            }
+          })
+          .catch(() => {});
+      }, 200);
+
+      return () => {
+        active = false;
+        clearTimeout(timeout);
+      };
     } else {
       setSearchResults([]);
       setIsSearchOpen(false);

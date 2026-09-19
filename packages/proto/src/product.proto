@@ -1,0 +1,96 @@
+syntax = "proto3";
+
+package product;
+
+service ProductService {
+  rpc GetProducts (GetProductsRequest) returns (GetProductsResponse);
+  rpc GetProductBySlug (GetProductBySlugRequest) returns (GetProductBySlugResponse);
+  rpc GetCategories (GetCategoriesRequest) returns (GetCategoriesResponse);
+}
+
+message CategoryDto {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  string description = 4;
+  string icon = 5;
+  string image_url = 6;
+  int32 item_count = 7;
+}
+
+message ProductSkuDto {
+  string id = 1;
+  string sku_code = 2;
+  string name = 3;
+  string color_name = 4;
+  string color_hex = 5;
+  double price = 6;
+  optional double original_price = 7;
+  int32 stock_quantity = 8;
+  optional string image_url = 9;
+  string specs_json = 10;
+}
+
+message ProductSpecDto {
+  string label = 1;
+  string value = 2;
+}
+
+message ProductDto {
+  string id = 1;
+  string category_id = 2;
+  string category_name = 3;
+  string category_slug = 4;
+  string brand = 5;
+  string name = 6;
+  string slug = 7;
+  string tagline = 8;
+  string description = 9;
+  string thumbnail_url = 10;
+  double base_price = 11;
+  optional double original_price = 12;
+  bool featured = 13;
+  bool is_flash_sale = 14;
+  int32 flash_sale_sold = 15;
+  int32 flash_sale_total = 16;
+  double rating = 17;
+  int32 review_count = 18;
+  optional string badge = 19;
+  repeated string images = 20;
+  repeated ProductSpecDto specs = 21;
+  repeated ProductSkuDto variants = 22;
+  string created_at = 23;
+}
+
+message GetProductsRequest {
+  optional string category_slug = 1;
+  optional string search_query = 2;
+  optional double min_price = 3;
+  optional double max_price = 4;
+  optional string sort_by = 5;
+  optional int32 page = 6;
+  optional int32 limit = 7;
+  optional bool featured_only = 8;
+  optional bool flash_sale_only = 9;
+}
+
+message GetProductsResponse {
+  repeated ProductDto products = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message GetProductBySlugRequest {
+  string slug = 1;
+}
+
+message GetProductBySlugResponse {
+  ProductDto product = 1;
+}
+
+message GetCategoriesRequest {}
+
+message GetCategoriesResponse {
+  repeated CategoryDto categories = 1;
+}

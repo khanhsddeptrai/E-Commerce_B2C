@@ -8,7 +8,8 @@
     "build": "turbo run build",
     "lint": "turbo run lint",
     "proto:generate": "turbo run proto:generate",
-    "db:generate": "turbo run db:generate"
+    "db:generate": "turbo run db:generate",
+    "db:studio": "pnpm --filter @repo/database db:studio"
   },
   "devDependencies": {
     "turbo": "^2.1.0"

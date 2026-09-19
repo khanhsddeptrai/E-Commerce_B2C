@@ -7,15 +7,12 @@ import {
   SlidersHorizontal,
   Search,
   X,
-  ChevronDown,
   ArrowUpDown,
   RotateCcw,
-  Sparkles,
 } from "lucide-react";
 import { ProductCard } from "@/components/ProductCard";
-import { MOCK_PRODUCTS } from "@/mock/products";
-import { MOCK_CATEGORIES } from "@/mock/categories";
-import { Product } from "@/types/ecommerce";
+import { productService } from "@/services/productService";
+import { Product, Category } from "@/types/ecommerce";
 
 function ProductsContent() {
   const router = useRouter();
@@ -24,11 +21,39 @@ function ProductsContent() {
   const initialCat = searchParams.get("category") || "all";
   const initialQuery = searchParams.get("q") || "";
 
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
   const [selectedCategory, setSelectedCategory] = useState<string>(initialCat);
   const [searchQuery, setSearchQuery] = useState<string>(initialQuery);
   const [priceRange, setPriceRange] = useState<string>("all");
   const [sortBy, setSortBy] = useState<string>("featured");
   const [isMobileFilterOpen, setIsMobileFilterOpen] = useState(false);
+
+  // Fetch live products & categories
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      productService.getProducts(),
+      productService.getCategories(),
+    ])
+      .then(([prodRes, catList]) => {
+        if (mounted) {
+          setProducts(prodRes.products);
+          setCategories(catList);
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error("Lỗi tải danh mục sản phẩm:", err);
+        if (mounted) setIsLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Sync state if URL changes
   useEffect(() => {
@@ -40,11 +65,13 @@ function ProductsContent() {
 
   // Filter products logic
   const filteredProducts = useMemo(() => {
-    let list = [...MOCK_PRODUCTS];
+    let list = [...products];
 
     // Filter by Category
     if (selectedCategory !== "all") {
-      list = list.filter((p) => p.categoryId === selectedCategory);
+      list = list.filter(
+        (p) => p.categoryId === selectedCategory || p.categoryName.toLowerCase() === selectedCategory.toLowerCase()
+      );
     }
 
     // Filter by Search Query
@@ -88,7 +115,7 @@ function ProductsContent() {
     }
 
     return list;
-  }, [selectedCategory, searchQuery, priceRange, sortBy]);
+  }, [products, selectedCategory, searchQuery, priceRange, sortBy]);
 
   const clearAllFilters = () => {
     setSelectedCategory("all");
@@ -101,6 +128,10 @@ function ProductsContent() {
   const hasActiveFilters =
     selectedCategory !== "all" || searchQuery.trim() !== "" || priceRange !== "all";
 
+  const activeCategoryObj = categories.find(
+    (c) => c.id === selectedCategory || c.slug === selectedCategory
+  );
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Breadcrumbs & Header */}
@@ -112,11 +143,11 @@ function ProductsContent() {
             </Link>
             <span>/</span>
             <span className="text-slate-900 font-semibold">Danh Mục Thiết Bị</span>
-            {selectedCategory !== "all" && (
+            {selectedCategory !== "all" && activeCategoryObj && (
               <>
                 <span>/</span>
                 <span className="text-indigo-600 font-semibold">
-                  {MOCK_CATEGORIES.find((c) => c.id === selectedCategory)?.name}
+                  {activeCategoryObj.name}
                 </span>
               </>
             )}
@@ -204,9 +235,9 @@ function ProductsContent() {
                 }`}
               >
                 <span>Tất Cả Danh Mục</span>
-                <span className="text-[11px] text-slate-400">{MOCK_PRODUCTS.length}</span>
+                <span className="text-[11px] text-slate-400">{products.length}</span>
               </button>
-              {MOCK_CATEGORIES.map((cat) => (
+              {categories.map((cat) => (
                 <button
                   key={cat.id}
                   onClick={() => setSelectedCategory(cat.id)}
@@ -277,9 +308,9 @@ function ProductsContent() {
           {hasActiveFilters && (
             <div className="flex flex-wrap items-center gap-2 p-3 bg-indigo-50/60 rounded-xl border border-indigo-100 text-xs text-slate-700">
               <span className="font-semibold text-indigo-700">Đang lọc:</span>
-              {selectedCategory !== "all" && (
+              {selectedCategory !== "all" && activeCategoryObj && (
                 <span className="inline-flex items-center gap-1 bg-white px-2.5 py-1 rounded-lg border border-indigo-200 text-indigo-700 font-medium">
-                  {MOCK_CATEGORIES.find((c) => c.id === selectedCategory)?.name}
+                  {activeCategoryObj.name}
                   <button onClick={() => setSelectedCategory("all")}>
                     <X className="w-3 h-3 text-slate-400 hover:text-rose-500" />
                   </button>
@@ -311,7 +342,13 @@ function ProductsContent() {
           )}
 
           {/* Products Grid or Empty State */}
-          {filteredProducts.length === 0 ? (
+          {isLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div key={i} className="h-80 rounded-2xl bg-slate-100 animate-pulse" />
+              ))}
+            </div>
+          ) : filteredProducts.length === 0 ? (
             <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center flex flex-col items-center justify-center space-y-4">
               <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
                 <Search className="w-8 h-8" />

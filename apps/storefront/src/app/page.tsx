@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -9,26 +9,51 @@ import {
   Shield,
   Layers,
   Cpu,
-  SlidersHorizontal,
   ChevronRight,
   BatteryCharging,
   Radio,
 } from "lucide-react";
 import { ProductCard } from "@/components/ProductCard";
 import { FlashSaleCountdown } from "@/components/FlashSaleCountdown";
-import { MOCK_PRODUCTS } from "@/mock/products";
-import { MOCK_CATEGORIES } from "@/mock/categories";
+import { productService } from "@/services/productService";
+import { Product, Category } from "@/types/ecommerce";
 
 export default function HomePage() {
   const [activeCategoryTab, setActiveCategoryTab] = useState<string>("all");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  const flagshipProduct = MOCK_PRODUCTS[0]; // Nova SoundCore Ultra ANC
-  const flashSaleProducts = MOCK_PRODUCTS.filter((p) => p.isFlashSale);
+  useEffect(() => {
+    let mounted = true;
+    Promise.all([
+      productService.getProducts(),
+      productService.getCategories(),
+    ])
+      .then(([prodRes, catList]) => {
+        if (mounted) {
+          setProducts(prodRes.products);
+          setCategories(catList);
+          setIsLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error("Lỗi tải dữ liệu trang chủ:", err);
+        if (mounted) setIsLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const flagshipProduct = products.find((p) => p.featured) || products[0];
+  const flashSaleProducts = products.filter((p) => p.isFlashSale);
 
   const filteredProducts =
     activeCategoryTab === "all"
-      ? MOCK_PRODUCTS
-      : MOCK_PRODUCTS.filter((p) => p.categoryId === activeCategoryTab);
+      ? products
+      : products.filter((p) => p.categoryId === activeCategoryTab);
 
   const formatPrice = (p: number) => {
     return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(p);
@@ -56,7 +81,9 @@ export default function HomePage() {
               </h1>
 
               <p className="text-base sm:text-lg text-slate-300 max-w-2xl font-normal leading-relaxed">
-                Tai nghe chống ồn thích ứng <b>Nova SoundCore Ultra ANC</b>. Màng loa Titanium 40mm, chip xử lý âm thanh kép Dual-DSP triệt tiêu 48dB tạp âm, thời lượng pin ấn tượng đến 65 giờ.
+                {flagshipProduct
+                  ? `${flagshipProduct.name}. ${flagshipProduct.tagline} ${flagshipProduct.description.slice(0, 120)}...`
+                  : "Tai nghe chống ồn thích ứng Nova SoundCore Ultra ANC. Màng loa Titanium 40mm, chip xử lý âm thanh kép Dual-DSP triệt tiêu 48dB tạp âm, thời lượng pin ấn tượng đến 65 giờ."}
               </p>
 
               {/* Key Highlights Pills */}
@@ -89,13 +116,23 @@ export default function HomePage() {
 
               {/* Action buttons */}
               <div className="flex flex-wrap items-center gap-4 pt-4">
-                <Link
-                  href={`/products/${flagshipProduct.slug}`}
-                  className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-indigo-600/30 flex items-center gap-2.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                >
-                  <span>Đặt Mua Ngay — {formatPrice(flagshipProduct.basePrice)}</span>
-                  <ArrowRight className="w-4 h-4" />
-                </Link>
+                {flagshipProduct ? (
+                  <Link
+                    href={`/products/${flagshipProduct.slug}`}
+                    className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-indigo-600/30 flex items-center gap-2.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <span>Đặt Mua Ngay — {formatPrice(flagshipProduct.basePrice)}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+                ) : (
+                  <Link
+                    href="/products"
+                    className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-indigo-600/30 flex items-center gap-2.5 transition-all"
+                  >
+                    <span>Khám Phá Sản Phẩm</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
+                )}
                 <Link
                   href="/products"
                   className="px-6 py-3.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 hover:text-white font-medium text-sm rounded-xl transition-all"
@@ -109,26 +146,34 @@ export default function HomePage() {
             <div className="lg:col-span-5 relative">
               <div className="relative mx-auto max-w-md lg:max-w-none">
                 <div className="aspect-square rounded-3xl overflow-hidden border border-slate-800/80 shadow-2xl relative group bg-gradient-to-b from-slate-900 to-slate-950">
-                  <img
-                    src={flagshipProduct.images[0]}
-                    alt={flagshipProduct.name}
-                    className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
-                  />
-                  {/* Floating Specs Pill */}
-                  <div className="absolute bottom-4 left-4 right-4 bg-slate-950/85 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 text-xs flex items-center justify-between">
-                    <div>
-                      <div className="text-amber-400 font-semibold flex items-center gap-1">
-                        <Zap className="w-3.5 h-3.5 fill-amber-400" /> Sẵn sàng giao hỏa tốc 2h
-                      </div>
-                      <div className="text-slate-300 font-medium mt-0.5">Bảo hành 24 tháng chính hãng</div>
+                  {flagshipProduct?.images?.[0] ? (
+                    <img
+                      src={flagshipProduct.images[0]}
+                      alt={flagshipProduct.name}
+                      className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-600">
+                      <Cpu className="w-16 h-16 animate-pulse" />
                     </div>
-                    <Link
-                      href={`/products/${flagshipProduct.slug}`}
-                      className="px-3 py-1.5 bg-white text-slate-950 font-bold rounded-lg hover:bg-slate-200 transition-colors"
-                    >
-                      Chi tiết
-                    </Link>
-                  </div>
+                  )}
+                  {/* Floating Specs Pill */}
+                  {flagshipProduct && (
+                    <div className="absolute bottom-4 left-4 right-4 bg-slate-950/85 backdrop-blur-md border border-slate-800/80 rounded-2xl p-4 text-xs flex items-center justify-between">
+                      <div>
+                        <div className="text-amber-400 font-semibold flex items-center gap-1">
+                          <Zap className="w-3.5 h-3.5 fill-amber-400" /> Sẵn sàng giao hỏa tốc 2h
+                        </div>
+                        <div className="text-slate-300 font-medium mt-0.5">Bảo hành 24 tháng chính hãng</div>
+                      </div>
+                      <Link
+                        href={`/products/${flagshipProduct.slug}`}
+                        className="px-3 py-1.5 bg-white text-slate-950 font-bold rounded-lg hover:bg-slate-200 transition-colors"
+                      >
+                        Chi tiết
+                      </Link>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -215,7 +260,7 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {MOCK_CATEGORIES.map((cat) => (
+          {categories.map((cat) => (
             <Link
               key={cat.id}
               href={`/products?category=${cat.id}`}
@@ -273,7 +318,7 @@ export default function HomePage() {
             >
               Tất Cả
             </button>
-            {MOCK_CATEGORIES.map((cat) => (
+            {categories.map((cat) => (
               <button
                 key={cat.id}
                 onClick={() => setActiveCategoryTab(cat.id)}
@@ -290,11 +335,19 @@ export default function HomePage() {
         </div>
 
         {/* Product Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProducts.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        {isLoading ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-80 rounded-2xl bg-slate-100 animate-pulse" />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {filteredProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* 5. CRAFTSMANSHIP & HARDWARE QUALITY PILLARS */}
