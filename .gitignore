@@ -36,3 +36,6 @@ pnpm-debug.log*
 .turbo/
 .cache/
 coverage/
+
+# Prisma generated clients (tự sinh lúc build/install, không đẩy lên git)
+packages/database/src/generated/

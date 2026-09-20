@@ -185,6 +185,19 @@ export class OrderService {
       STRIPE: OrderPrisma.PaymentMethod.STRIPE,
     };
     const paymentMethod = validPaymentMethods[data.payment_method] || OrderPrisma.PaymentMethod.COD;
+    const isCod = paymentMethod === OrderPrisma.PaymentMethod.COD;
+
+    const initialOrderStatus = isCod
+      ? OrderPrisma.OrderStatus.CONFIRMED
+      : OrderPrisma.OrderStatus.PENDING;
+    const initialPaymentStatus = OrderPrisma.PaymentStatus.PENDING;
+    const reservationStatus = isCod
+      ? OrderPrisma.ReservationStatus.COMMITTED
+      : OrderPrisma.ReservationStatus.HOLD;
+    const expiresAt = isCod ? null : new Date(Date.now() + 15 * 60 * 1000);
+    const initialNote = isCod
+      ? 'Đơn hàng COD được xác nhận tự động - Đã chốt giữ tồn kho'
+      : 'Khách hàng đặt hàng thành công - Chờ thanh toán trực tuyến trong 15 phút';
 
     const order: OrderWithItems = await this.prisma.$transaction(async (tx): Promise<OrderWithItems> => {
       const createdOrder = await tx.order.create({
@@ -200,8 +213,8 @@ export class OrderService {
           shippingFee,
           totalAmount,
           paymentMethod,
-          paymentStatus: 'PENDING',
-          orderStatus: 'PENDING',
+          paymentStatus: initialPaymentStatus,
+          orderStatus: initialOrderStatus,
           voucherCode: data.voucher_code || undefined,
           note: data.note || undefined,
           items: {
@@ -210,8 +223,8 @@ export class OrderService {
           statusHistory: {
             create: {
               fromStatus: 'NONE',
-              toStatus: 'PENDING',
-              note: 'Khách hàng đặt hàng thành công',
+              toStatus: initialOrderStatus,
+              note: initialNote,
               changedBy: data.customer_id || 'CUSTOMER',
             },
           },
@@ -221,15 +234,14 @@ export class OrderService {
         },
       });
 
-      // Tạo bản ghi giữ hàng 15 phút (SAGA Reservation)
-      const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+      // Tạo bản ghi giữ hàng (SAGA Reservation)
       for (const item of data.items) {
         await tx.inventoryReservation.create({
           data: {
             orderId: createdOrder.id,
             skuId: item.sku_id,
             quantity: item.quantity,
-            status: 'HOLD',
+            status: reservationStatus,
             expiresAt,
           },
         });

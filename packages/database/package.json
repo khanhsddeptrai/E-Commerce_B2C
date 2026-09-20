@@ -6,6 +6,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "db:generate": "prisma generate",
+    "db:generate:all": "prisma generate && prisma generate --schema=prisma/schema-product.prisma && prisma generate --schema=prisma/schema-order.prisma",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:product:generate": "prisma generate --schema=prisma/schema-product.prisma",

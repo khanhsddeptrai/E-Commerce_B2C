@@ -109,7 +109,7 @@ model InventoryReservation {
   skuId     String            @map("sku_id") @db.Uuid
   quantity  Int               @map("quantity")
   status    ReservationStatus @default(HOLD) @map("status")
-  expiresAt DateTime          @map("expires_at")
+  expiresAt DateTime?         @map("expires_at")
   createdAt DateTime          @default(now()) @map("created_at")
 
   order     Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
