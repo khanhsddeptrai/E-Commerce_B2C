@@ -36,17 +36,17 @@
 ## Giai Đoạn 3: Giỏ Hàng, Quản Lý Kho & Đơn Hàng (Cart, Inventory & Order)
 * **Mục tiêu**: Vận hành giỏ hàng tức thời và cơ chế đặt hàng có bảo vệ tồn kho Flash Sale.
 * **Các công việc cụ thể**:
-  - [ ] Xây dựng **Giỏ hàng trên Redis**: Thêm/sửa/xóa sản phẩm bằng Redis Hash.
-  - [ ] Viết **Redis Lua Script**: Kiểm tra và giữ kho tức thì (`Hold stock`) với TTL 15 phút.
-  - [ ] Xây dựng **Order Service**:
-    - Thiết lập `order_db` (Bảng `orders`, `order_items`, `inventory_reservations`, `vouchers`).
-    - API tạo đơn hàng (Create Checkout) kèm kiểm tra mã giảm giá (Atomic Counter).
-    - Quản lý vòng đời trạng thái đơn hàng (Order State Machine).
+  - [x] Xây dựng **Giỏ hàng trên Redis**: Thêm/sửa/xóa sản phẩm bằng Redis Hash (`cart:{userId}` / `cart:{guestSessionId}`).
+  - [x] Viết **Redis Lua Script**: Kiểm tra và giữ kho tức thì (`Hold stock`) nguyên tử với TTL 15 phút.
+  - [x] Xây dựng **Order Service**:
+    - [x] Thiết lập `order_db` (Bảng `orders`, `order_items`, `inventory_reservations`).
+    - [x] API tạo đơn hàng (Create Checkout) kèm định dạng mã chuẩn `ORD-YYMMDD-XXXX`.
+    - [ ] Quản lý vòng đời trạng thái đơn hàng (Order State Machine hoàn chỉnh).
 
 ---
 
-## Giai Đoạn 4: Thanh Toán & SAGA Orchestration (Payment & Consistency)
-* **Mục tiêu**: Tích hợp cổng thanh toán trực tuyến và hoàn thiện quy trình giao dịch phân tán an toàn.
+## Giai Đoạn 4: Thanh Toán, Vận Chuyển & SAGA Orchestration (Payment, Logistics & Consistency)
+* **Mục tiêu**: Tích hợp cổng thanh toán trực tuyến, hoàn thiện quy trình giao dịch phân tán an toàn và hệ thống giả lập vận chuyển thông minh.
 * **Các công việc cụ thể**:
   - [ ] Xây dựng **Payment Service**:
     - Thiết lập `payment_db`.
@@ -56,6 +56,14 @@
     - Nhận event `PaymentSucceeded` $\rightarrow$ Xác nhận đơn `CONFIRMED` $\rightarrow$ Trừ kho thật.
     - Nhận event `PaymentFailed` $\rightarrow$ Hủy đơn `CANCELLED` $\rightarrow$ Nhả kho Redis.
   - [ ] Áp dụng **Transactional Outbox Pattern**: Ngăn chặn tình trạng Dual-Write thất thoát sự kiện.
+  - [ ] Xây dựng **Hệ Thống Giả Lập Vận Chuyển (Mock Logistics Simulator - Cách 2)**:
+    - **Tầng Dịch Vụ Khách Hàng (Storefront Checkout)**: Cho phép khách chọn gói cước *Giao Tiêu Chuẩn (2-4 ngày)* hoặc *Giao Hỏa Tốc (24h)* thay vì phải chọn từng hãng vận chuyển cụ thể.
+    - **Bộ Phân Luồng Thông Minh (Smart Routing Logic)**: Backend tự động map gói cước với đối tác phù hợp (Standard $\rightarrow$ GHN/Viettel Post, Express $\rightarrow$ GHTK/AhaMove) và sinh mã vận đơn chuẩn định dạng (VD: `GHN-VN-8492019`).
+    - **Cơ Chế Giả Lập Webhook & Timeline (Mock Carrier Webhook & Auto Simulator)**:
+      - Endpoint giả lập Webhook từ hãng giao vận (`POST /api/v1/mock/carrier/update-status`) cho phép Dev/Admin mô phỏng các sự kiện: `PICKED_UP` $\rightarrow$ `IN_TRANSIT` $\rightarrow$ `OUT_FOR_DELIVERY` $\rightarrow$ `DELIVERED`.
+      - Tự động cập nhật `payment_status = PAID` khi đơn COD được giao thành công (`DELIVERED`).
+      - Hỗ trợ chế độ Auto-Timeline Simulator (tự động nhảy trạng thái sau mỗi khoảng thời gian định sẵn để demo/kiểm thử).
+    - **Giao Diện Theo Dõi Đơn Hàng (Order Tracking Timeline UI)**: Hiển thị tiến trình đơn hàng trực quan từng bước cho khách hàng trên Storefront.
   - [ ] Hoàn thiện màn hình Checkout và Trang tra cứu lịch sử đơn hàng trên Storefront.
 
 ---

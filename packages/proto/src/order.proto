@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package order;
+
+service OrderService {
+  rpc CreateOrder (CreateOrderRequest) returns (CreateOrderResponse);
+  rpc GetOrderById (GetOrderByIdRequest) returns (GetOrderByIdResponse);
+  rpc GetOrdersByCustomer (GetOrdersByCustomerRequest) returns (GetOrdersByCustomerResponse);
+  rpc CancelOrder (CancelOrderRequest) returns (CancelOrderResponse);
+}
+
+message OrderItemInputDto {
+  string sku_id = 1;
+  int32 quantity = 2;
+}
+
+message CreateOrderRequest {
+  string customer_id = 1;
+  string customer_name = 2;
+  string customer_phone = 3;
+  string customer_email = 4;
+  string shipping_address_json = 5;
+  string payment_method = 6;
+  optional string voucher_code = 7;
+  optional string note = 8;
+  repeated OrderItemInputDto items = 9;
+}
+
+message OrderItemDto {
+  string id = 1;
+  string sku_id = 2;
+  string product_id = 3;
+  string product_name = 4;
+  string sku_name = 5;
+  double unit_price = 6;
+  int32 quantity = 7;
+  double total_price = 8;
+  optional string thumbnail_url = 9;
+}
+
+message OrderDto {
+  string id = 1;
+  string order_code = 2;
+  string customer_id = 3;
+  string customer_name = 4;
+  string customer_phone = 5;
+  string customer_email = 6;
+  string shipping_address_json = 7;
+  double subtotal_amount = 8;
+  double discount_amount = 9;
+  double shipping_fee = 10;
+  double total_amount = 11;
+  string payment_method = 12;
+  string payment_status = 13;
+  string order_status = 14;
+  optional string voucher_code = 15;
+  optional string cancel_reason = 16;
+  optional string note = 17;
+  repeated OrderItemDto items = 18;
+  string created_at = 19;
+}
+
+message CreateOrderResponse {
+  bool success = 1;
+  string message = 2;
+  optional OrderDto order = 3;
+}
+
+message GetOrderByIdRequest {
+  string order_id = 1;
+  optional string customer_id = 2;
+}
+
+message GetOrderByIdResponse {
+  OrderDto order = 1;
+}
+
+message GetOrdersByCustomerRequest {
+  string customer_id = 1;
+  optional int32 page = 2;
+  optional int32 limit = 3;
+}
+
+message GetOrdersByCustomerResponse {
+  repeated OrderDto orders = 1;
+  int32 total = 2;
+}
+
+message CancelOrderRequest {
+  string order_id = 1;
+  string customer_id = 2;
+  string reason = 3;
+}
+
+message CancelOrderResponse {
+  bool success = 1;
+  string message = 2;
+}

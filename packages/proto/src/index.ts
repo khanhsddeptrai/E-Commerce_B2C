@@ -197,3 +197,101 @@ export interface ProductServiceClient {
   getCategories(request: GetCategoriesRequest): Observable<GetCategoriesResponse>;
 }
 
+export const ORDER_PROTO_PATH = getProtoPath('order.proto');
+export const ORDER_PACKAGE_NAME = 'order';
+
+export interface OrderItemInputDto {
+  sku_id: string;
+  quantity: number;
+}
+
+export interface CreateOrderRequest {
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  shipping_address_json: string;
+  payment_method: string;
+  voucher_code?: string;
+  note?: string;
+  items: OrderItemInputDto[];
+}
+
+export interface OrderItemDto {
+  id: string;
+  sku_id: string;
+  product_id: string;
+  product_name: string;
+  sku_name: string;
+  unit_price: number;
+  quantity: number;
+  total_price: number;
+  thumbnail_url?: string;
+}
+
+export interface OrderDto {
+  id: string;
+  order_code: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  shipping_address_json: string;
+  subtotal_amount: number;
+  discount_amount: number;
+  shipping_fee: number;
+  total_amount: number;
+  payment_method: string;
+  payment_status: string;
+  order_status: string;
+  voucher_code?: string;
+  cancel_reason?: string;
+  note?: string;
+  items: OrderItemDto[];
+  created_at: string;
+}
+
+export interface CreateOrderResponse {
+  success: boolean;
+  message: string;
+  order?: OrderDto;
+}
+
+export interface GetOrderByIdRequest {
+  order_id: string;
+  customer_id?: string;
+}
+
+export interface GetOrderByIdResponse {
+  order: OrderDto;
+}
+
+export interface GetOrdersByCustomerRequest {
+  customer_id: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface GetOrdersByCustomerResponse {
+  orders: OrderDto[];
+  total: number;
+}
+
+export interface CancelOrderRequest {
+  order_id: string;
+  customer_id: string;
+  reason: string;
+}
+
+export interface CancelOrderResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface OrderServiceClient {
+  createOrder(request: CreateOrderRequest): Observable<CreateOrderResponse>;
+  getOrderById(request: GetOrderByIdRequest): Observable<GetOrderByIdResponse>;
+  getOrdersByCustomer(request: GetOrdersByCustomerRequest): Observable<GetOrdersByCustomerResponse>;
+  cancelOrder(request: CancelOrderRequest): Observable<CancelOrderResponse>;
+}
+

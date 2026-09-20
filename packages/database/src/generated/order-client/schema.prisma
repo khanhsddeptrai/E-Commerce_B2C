@@ -1,0 +1,121 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("ORDER_DATABASE_URL")
+}
+
+generator orderClient {
+  provider = "prisma-client-js"
+  output   = "../src/generated/order-client"
+}
+
+enum PaymentMethod {
+  COD
+  VNPAY
+  MOMO
+  STRIPE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPING
+  DELIVERED
+  CANCELLED
+  RETURNED
+}
+
+enum ReservationStatus {
+  HOLD
+  COMMITTED
+  RELEASED
+}
+
+model Order {
+  id              String        @id @default(uuid()) @db.Uuid
+  orderCode       String        @unique @map("order_code") @db.VarChar(50)
+  customerId      String        @map("customer_id") @db.Uuid
+  customerName    String        @map("customer_name") @db.VarChar(150)
+  customerPhone   String        @map("customer_phone") @db.VarChar(20)
+  customerEmail   String        @map("customer_email") @db.VarChar(255)
+  shippingAddress Json          @map("shipping_address") @db.JsonB
+  subtotalAmount  Decimal       @map("subtotal_amount") @db.Decimal(15, 2)
+  discountAmount  Decimal       @default(0) @map("discount_amount") @db.Decimal(15, 2)
+  shippingFee     Decimal       @default(0) @map("shipping_fee") @db.Decimal(15, 2)
+  totalAmount     Decimal       @map("total_amount") @db.Decimal(15, 2)
+  paymentMethod   PaymentMethod @default(COD) @map("payment_method")
+  paymentStatus   PaymentStatus @default(PENDING) @map("payment_status")
+  orderStatus     OrderStatus   @default(PENDING) @map("order_status")
+  voucherCode     String?       @map("voucher_code") @db.VarChar(50)
+  cancelReason    String?       @map("cancel_reason") @db.Text
+  note            String?       @db.Text
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  items         OrderItem[]
+  statusHistory OrderStatusHistory[]
+  reservations  InventoryReservation[]
+
+  @@index([customerId])
+  @@index([createdAt])
+  @@index([orderStatus])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String  @id @default(uuid()) @db.Uuid
+  orderId      String  @map("order_id") @db.Uuid
+  skuId        String  @map("sku_id") @db.Uuid
+  productId    String  @map("product_id") @db.Uuid
+  productName  String  @map("product_name") @db.VarChar(255)
+  skuName      String  @map("sku_name") @db.VarChar(255)
+  unitPrice    Decimal @map("unit_price") @db.Decimal(15, 2)
+  quantity     Int     @map("quantity")
+  totalPrice   Decimal @map("total_price") @db.Decimal(15, 2)
+  thumbnailUrl String? @map("thumbnail_url") @db.Text
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([skuId])
+  @@map("order_items")
+}
+
+model OrderStatusHistory {
+  id         String   @id @default(uuid()) @db.Uuid
+  orderId    String   @map("order_id") @db.Uuid
+  fromStatus String   @map("from_status") @db.VarChar(50)
+  toStatus   String   @map("to_status") @db.VarChar(50)
+  note       String?  @db.Text
+  changedBy  String   @map("changed_by") @db.VarChar(100)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("order_status_history")
+}
+
+model InventoryReservation {
+  id        String            @id @default(uuid()) @db.Uuid
+  orderId   String?           @map("order_id") @db.Uuid
+  skuId     String            @map("sku_id") @db.Uuid
+  quantity  Int               @map("quantity")
+  status    ReservationStatus @default(HOLD) @map("status")
+  expiresAt DateTime          @map("expires_at")
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([skuId])
+  @@index([status, expiresAt])
+  @@map("inventory_reservations")
+}

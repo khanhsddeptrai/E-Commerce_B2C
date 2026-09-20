@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 
+import { orderService } from "@/services/orderService";
+
 export default function CheckoutPage() {
   const router = useRouter();
   const { items, subtotal, discount, shipping, total, clearCart, voucherCode } = useCart();
@@ -31,6 +33,7 @@ export default function CheckoutPage() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [orderSuccess, setOrderSuccess] = useState<{
     orderId: string;
     total: number;
@@ -44,21 +47,45 @@ export default function CheckoutPage() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSubmitOrder = (e: React.FormEvent) => {
+  const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (items.length === 0) return;
 
     setIsSubmitting(true);
-    // Simulate Order Service & Payment SAGA
-    setTimeout(() => {
-      const generatedOrderId = `NV-${Math.floor(100000 + Math.random() * 900000)}`;
+    setErrorMessage(null);
+
+    const fullAddress = `${formData.address}, ${formData.district}, ${formData.city}`;
+    const payload = {
+      customer_name: formData.fullName,
+      customer_phone: formData.phone,
+      customer_email: formData.email,
+      shipping_address_json: JSON.stringify({
+        address: formData.address,
+        district: formData.district,
+        city: formData.city,
+        fullAddress,
+      }),
+      payment_method: paymentMethod.toUpperCase(),
+      voucher_code: voucherCode || undefined,
+      note: formData.note || undefined,
+      items: items.map((i) => ({
+        sku_id: i.variantId,
+        quantity: i.quantity,
+      })),
+    };
+
+    const res = await orderService.createOrder(payload);
+
+    if (res.success && res.order) {
       setOrderSuccess({
-        orderId: generatedOrderId,
-        total: total,
+        orderId: res.order.order_code,
+        total: res.order.total_amount,
       });
       clearCart();
-      setIsSubmitting(false);
-    }, 1200);
+    } else {
+      setErrorMessage(res.message || "Đặt hàng không thành công. Vui lòng kiểm tra lại tồn kho.");
+    }
+    setIsSubmitting(false);
   };
 
   return (
@@ -395,6 +422,14 @@ export default function CheckoutPage() {
               <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
               <span>Giao dịch bảo mật 100% qua chuẩn mã hóa thanh toán cấp doanh nghiệp.</span>
             </div>
+
+            {/* Error Message */}
+            {errorMessage && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-xs flex items-start gap-2">
+                <span className="font-bold">Lỗi:</span>
+                <span>{errorMessage}</span>
+              </div>
+            )}
 
             {/* Place Order Button */}
             <button

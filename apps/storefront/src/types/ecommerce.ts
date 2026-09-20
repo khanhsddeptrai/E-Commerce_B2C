@@ -155,3 +155,73 @@ export interface ApiCategoryDto {
   image_url?: string;
   featuredImage?: string;
 }
+
+export interface ApiCartStoredItem {
+  sku_id: string;
+  product_id?: string;
+  product_name?: string;
+  product_slug?: string;
+  variant_name?: string;
+  color_name?: string;
+  price: number;
+  original_price?: number;
+  image?: string;
+  quantity: number;
+  max_stock: number;
+  added_at: string;
+}
+
+export interface ApiCartDto {
+  cart_key: string;
+  items: ApiCartStoredItem[];
+  item_count: number;
+  subtotal_amount: number;
+}
+
+export interface ApiOrderItemDto {
+  id: string;
+  sku_id: string;
+  product_id: string;
+  product_name: string;
+  sku_name: string;
+  unit_price: number;
+  quantity: number;
+  total_price: number;
+  thumbnail_url?: string;
+}
+
+export interface ApiOrderDto {
+  id: string;
+  order_code: string;
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  shipping_address_json: string;
+  subtotal_amount: number;
+  discount_amount: number;
+  shipping_fee: number;
+  total_amount: number;
+  payment_method: string;
+  payment_status: string;
+  order_status: string;
+  voucher_code?: string;
+  cancel_reason?: string;
+  note?: string;
+  items: ApiOrderItemDto[];
+  created_at: string;
+}
+
+export interface CreateOrderPayload {
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  shipping_address_json: string;
+  payment_method: string;
+  voucher_code?: string;
+  note?: string;
+  items: {
+    sku_id: string;
+    quantity: number;
+  }[];
+}

@@ -1,7 +1,8 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from "react";
-import { CartItem, Product, ProductVariant } from "@/types/ecommerce";
+import { cartService } from "@/services/cartService";
+import { ApiCartStoredItem, CartItem, Product, ProductVariant } from "@/types/ecommerce";
 
 interface CartContextType {
   items: CartItem[];
@@ -32,7 +33,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [discountPercent, setDiscountPercent] = useState(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Load from localStorage on mount
+  // Load from localStorage & sync from Redis server on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem("nova_cart");
@@ -42,6 +43,27 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // Ignore storage errors
     }
+
+    // Nạp giỏ hàng từ Redis qua API Gateway
+    cartService.getCart().then((remoteCart) => {
+      if (remoteCart && Array.isArray(remoteCart.items) && remoteCart.items.length > 0) {
+        setItems(
+          remoteCart.items.map((i: ApiCartStoredItem) => ({
+            productId: i.product_id || "",
+            productName: i.product_name || "",
+            productSlug: i.product_slug || "",
+            variantId: i.sku_id,
+            variantName: i.variant_name || "",
+            colorName: i.color_name || "",
+            price: Number(i.price),
+            originalPrice: i.original_price ? Number(i.original_price) : undefined,
+            image: i.image || "",
+            quantity: i.quantity,
+            maxStock: i.max_stock || 99,
+          }))
+        );
+      }
+    });
   }, []);
 
   // Save to localStorage
@@ -91,12 +113,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       ];
     });
 
+    // Đồng bộ sang Redis server
+    cartService.addItem(product, variant, quantity);
+
     showToast(`Đã thêm "${product.name}" vào giỏ hàng!`);
     setIsOpen(true);
   };
 
   const removeFromCart = (variantId: string) => {
     setItems((prev) => prev.filter((item) => item.variantId !== variantId));
+    // Xóa trên Redis
+    cartService.removeItem(variantId);
   };
 
   const updateQuantity = (variantId: string, quantity: number) => {
@@ -111,12 +138,16 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           : item
       )
     );
+    // Đồng bộ số lượng trên Redis
+    cartService.updateQuantity(variantId, quantity);
   };
 
   const clearCart = () => {
     setItems([]);
     setVoucherCode("");
     setDiscountPercent(0);
+    // Xóa giỏ hàng trên Redis
+    cartService.clearCart();
   };
 
   const applyVoucher = (code: string) => {
