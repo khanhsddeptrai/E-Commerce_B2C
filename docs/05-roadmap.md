@@ -1,6 +1,6 @@
 # 05. Lộ Trình Triển Khai (Implementation Roadmap & Milestones)
 
-> Tài liệu này vạch ra 5 giai đoạn phát triển chi tiết từ việc thiết lập hạ tầng Monorepo đến khi hệ thống sẵn sàng triển khai thực tế.
+> Tài liệu này vạch ra 6 giai đoạn phát triển chi tiết từ việc thiết lập hạ tầng Monorepo đến khi hệ thống sẵn sàng triển khai thực tế.
 
 ---
 
@@ -68,18 +68,34 @@
 
 ---
 
-## Giai Đoạn 5: Realtime Chat, Admin Dashboard & Hoàn Thiện (Launch Ready)
-* **Mục tiêu**: Xây dựng kênh chat CSKH thời gian thực, giao diện quản trị Admin và kiểm thử toàn diện.
+## Giai Đoạn 5: Quản Trị Hệ Thống & Quản Lý Kho (Admin Dashboard & WMS)
+* **Mục tiêu**: Xây dựng trang quản trị toàn diện cho nhân viên/chủ shop và hệ thống quản lý xuất - nhập - tồn kho thực tế.
 * **Các công việc cụ thể**:
-  - [ ] Xây dựng **Notification & Chat Service**:
+  - [ ] Xây dựng **Hệ Thống Quản Lý Kho Thực Tế (WMS - Warehouse Management)**:
+    - **Cơ sở dữ liệu kho (`product_db`)**:
+      - Bổ sung bảng `inventory_receipts` (Phiếu nhập kho từ nhà cung cấp kèm mã phiếu `GRN-XXXX`, giá vốn `cost_price`).
+      - Bổ sung bảng `inventory_transactions` (Sổ nhật ký xuất - nhập - tồn: audit trail chi tiết từng SKU, số lượng thay đổi, số dư cuối, loại biến động `INBOUND`, `OUTBOUND`, `ADJUSTMENT`, `RETURN`).
+    - **Quy trình Nhập kho (Inbound)**: Tạo phiếu nhập hàng mới $\rightarrow$ cập nhật tồn kho vật lý `product_skus.stock_quantity` $\rightarrow$ tự động tăng tồn khả dụng trên Redis Cache (`INCRBY stock:{skuId}`).
+    - **Quy trình Xuất kho (Outbound & Order Fulfillment)**: Thủ kho bấm *"Xác nhận xuất kho đóng gói giao Shipper"* $\rightarrow$ trừ tồn kho vật lý thực tế trong CSDL và ghi nhận giao dịch theo mã đơn hàng.
+    - **Quy trình Kiểm kê & Hàng hoàn (Stock Adjustment & Returns)**: Xử lý hàng hư hỏng, xuất hủy hoặc nhập lại kho khi shipper hoàn đơn giao không thành công.
+  - [ ] Xây dựng **Admin Dashboard (Next.js + Shadcn UI - `apps/admin`)**:
+    - Quản lý sản phẩm, danh mục, thương hiệu, biến thể SKU và thông số kỹ thuật (TanStack Table).
+    - Phân hệ Quản lý Kho: Tra cứu tồn thực tế vs tồn bán được, tạo phiếu nhập kho, xuất báo cáo xuất-nhập-tồn.
+    - Phân hệ Quản lý Đơn hàng: Xem chi tiết đơn hàng, duyệt đơn, xuất kho và công cụ kích hoạt giả lập Webhook vận chuyển (Mock Carrier Trigger).
+
+---
+
+## Giai Đoạn 6: CSKH Trực Tuyến, Kiểm Thử & Triển Khai (Realtime Chat & Launch Ready)
+* **Mục tiêu**: Tích hợp kênh hỗ trợ trực tuyến thời gian thực, hoàn thiện bộ kiểm thử tự động và đóng gói triển khai môi trường Production.
+* **Các công việc cụ thể**:
+  - [ ] Xây dựng **Notification & Chat Service (`apps/chat-service`)**:
     - Kết nối WebSocket hai chiều với **Socket.io** (`@nestjs/platform-socket.io`).
-    - Lưu lịch sử tin nhắn vào **MongoDB**.
-    - Gửi email tự động khi đơn hàng thay đổi trạng thái.
-  - [ ] Xây dựng **Admin Dashboard (Next.js + Shadcn UI)**:
-    - Quản lý sản phẩm, biến thể, kho hàng (TanStack Table).
-    - Quản lý danh sách đơn hàng và cập nhật trạng thái vận chuyển.
-    - Giao diện tiếp nhận phiên chat CSKH trực tiếp với khách hàng.
-  - [ ] **Kiểm thử & Triển khai**:
-    - Viết Unit Tests (Jest) và E2E Tests (Playwright).
-    - Cấu hình CI/CD Pipeline với GitHub Actions.
-    - Viết `docker-compose.apps.yml` khởi chạy trọn gói toàn bộ hệ thống.
+    - Lưu lịch sử tin nhắn vào **MongoDB** và định tuyến phòng chat theo khách hàng.
+    - Gửi email tự động khi đơn hàng thay đổi trạng thái (chờ thanh toán, đang giao, giao thành công).
+    - Tích hợp Widget Chat nổi trên Storefront và Cổng tiếp nhận chat CSKH trên Admin Dashboard.
+  - [ ] **Kiểm thử Toàn Diện (Testing Suite)**:
+    - Viết Unit Tests (Jest) cho nghiệp vụ Core: Redis Lua Script, tính giá đơn hàng, State Machine.
+    - Viết E2E Tests (Playwright) cho luồng mua sắm hoàn chỉnh: Duyệt hàng $\rightarrow$ Thêm giỏ $\rightarrow$ Đặt hàng $\rightarrow$ Webhook vận chuyển.
+  - [ ] **Tự Động Hóa & Đóng Gói Triển Khai (CI/CD & DevOps)**:
+    - Cấu hình CI/CD Pipeline với GitHub Actions (Lint, Typecheck, Build, Test).
+    - Viết `docker-compose.apps.yml` và Dockerfile tối ưu (Multi-stage build) khởi chạy trọn gói toàn bộ hệ thống.
