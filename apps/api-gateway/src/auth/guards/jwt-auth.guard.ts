@@ -46,8 +46,9 @@ export class JwtAuthGuard implements CanActivate, OnModuleInit {
       };
 
       return true;
-    } catch (err: any) {
-      throw new UnauthorizedException(err.message || 'Xác thực thất bại');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Xác thực thất bại';
+      throw new UnauthorizedException(message);
     }
   }
 }

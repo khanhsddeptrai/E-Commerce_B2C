@@ -7,9 +7,15 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 
+interface GrpcError {
+  code?: number;
+  details?: string;
+  message?: string;
+}
+
 @Catch()
 export class GrpcToHttpExceptionFilter implements ExceptionFilter {
-  catch(exception: any, host: ArgumentsHost) {
+  catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
 
@@ -21,11 +27,12 @@ export class GrpcToHttpExceptionFilter implements ExceptionFilter {
     }
 
     // Xử lý lỗi gRPC status code
+    const grpcErr = (exception || {}) as GrpcError;
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
-    let message = exception.details || exception.message || 'Lỗi hệ thống nội bộ';
+    let message = grpcErr.details || grpcErr.message || 'Lỗi hệ thống nội bộ';
 
     // Mã lỗi gRPC chuẩn
-    switch (exception.code) {
+    switch (grpcErr.code) {
       case 3: // INVALID_ARGUMENT
         status = HttpStatus.BAD_REQUEST;
         break;

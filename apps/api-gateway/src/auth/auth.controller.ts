@@ -15,6 +15,14 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto, RefreshTokenDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
+export interface RequestWithUser {
+  user: {
+    userId: string;
+    email: string;
+    role: string;
+  };
+}
+
 @Controller('api/v1/auth')
 export class AuthController implements OnModuleInit {
   private authServiceClient!: AuthServiceClient;
@@ -28,29 +36,19 @@ export class AuthController implements OnModuleInit {
   @Post('register')
   async register(@Body() dto: RegisterDto) {
     try {
-      return await firstValueFrom(
-        this.authServiceClient.register({
-          email: dto.email,
-          password: dto.password,
-          full_name: dto.full_name,
-          phone: dto.phone,
-        }),
-      );
-    } catch (err: any) {
-      console.error('>>> [API Gateway /register] Error:', err);
+      return await firstValueFrom(this.authServiceClient.register(dto));
+    } catch (err: unknown) {
       throw err;
     }
   }
 
   @Post('login')
   async login(@Body() dto: LoginDto) {
-    return firstValueFrom(
-      this.authServiceClient.login({
-        email: dto.email,
-        password: dto.password,
-        device_info: dto.device_info,
-      }),
-    );
+    try {
+      return await firstValueFrom(this.authServiceClient.login(dto));
+    } catch (err: unknown) {
+      throw err;
+    }
   }
 
   @Post('refresh')
@@ -64,7 +62,7 @@ export class AuthController implements OnModuleInit {
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  async getMe(@Req() req: any) {
+  async getMe(@Req() req: RequestWithUser) {
     return firstValueFrom(
       this.authServiceClient.getProfile({
         user_id: req.user.userId,

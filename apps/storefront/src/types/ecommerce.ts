@@ -81,3 +81,77 @@ export interface FilterState {
   sortBy?: "featured" | "price-asc" | "price-desc" | "rating" | "newest";
   brand?: string;
 }
+
+// ==========================================
+// Backend API Gateway / gRPC DTO Responses
+// ==========================================
+export interface ApiProductSpecDto {
+  label: string;
+  value: string;
+}
+
+export interface ApiProductSkuDto {
+  id: string;
+  sku_code?: string;
+  sku?: string;
+  name: string;
+  color_name?: string;
+  colorName?: string;
+  color_hex?: string;
+  colorHex?: string;
+  price: number | string;
+  original_price?: number | string;
+  originalPrice?: number | string;
+  stock_quantity?: number;
+  stock?: number;
+  image_url?: string;
+  image?: string;
+  specs_json?: string;
+  specs?: Record<string, string>;
+}
+
+export interface ApiProductDto {
+  id: string;
+  slug: string;
+  name: string;
+  tagline?: string;
+  description: string;
+  category_id?: string;
+  categoryId?: string;
+  category_name?: string;
+  categoryName?: string;
+  category_slug?: string;
+  brand?: string;
+  badge?: string;
+  featured?: boolean;
+  is_flash_sale?: boolean;
+  isFlashSale?: boolean;
+  flash_sale_sold?: number;
+  flashSaleSold?: number;
+  flash_sale_total?: number;
+  flashSaleTotal?: number;
+  base_price?: number | string;
+  basePrice?: number | string;
+  original_price?: number | string;
+  originalPrice?: number | string;
+  rating?: number | string;
+  review_count?: number;
+  reviewCount?: number;
+  images?: string[];
+  specs?: ApiProductSpecDto[];
+  variants?: ApiProductSkuDto[];
+  created_at?: string;
+  createdAt?: string;
+}
+
+export interface ApiCategoryDto {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  item_count?: number;
+  itemCount?: number;
+  image_url?: string;
+  featuredImage?: string;
+}

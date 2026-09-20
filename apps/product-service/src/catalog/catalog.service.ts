@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
 import { PrismaProductService } from '../prisma/prisma-product.service';
+import { ProductPrisma } from '@repo/database';
 import {
   GetProductsRequest,
   GetProductsResponse,
@@ -10,8 +11,27 @@ import {
   GetCategoriesRequest,
   GetCategoriesResponse,
   ProductDto,
-  CategoryDto,
 } from '@repo/proto';
+
+interface ExtendedGetProductsRequest extends GetProductsRequest {
+  categorySlug?: string;
+  searchQuery?: string;
+  minPrice?: number;
+  maxPrice?: number;
+  sortBy?: string;
+  featuredOnly?: boolean;
+  flashSaleOnly?: boolean;
+}
+
+type ProductWithRelations = ProductPrisma.Prisma.ProductGetPayload<{
+  include: {
+    category: true;
+    brand: true;
+    images: { orderBy: { displayOrder: 'asc' } };
+    skus: { where: { isActive: true } };
+    specs: { orderBy: { displayOrder: 'asc' } };
+  };
+}>;
 
 @Injectable()
 export class CatalogService {
@@ -22,11 +42,12 @@ export class CatalogService {
     const limit = Math.max(1, Math.min(100, Number(data.limit) || 20));
     const skip = (page - 1) * limit;
 
-    const where: any = {
+    const where: ProductPrisma.Prisma.ProductWhereInput = {
       status: 'PUBLISHED',
     };
 
-    const categorySlug = data.category_slug || (data as any).categorySlug;
+    const extData = data as ExtendedGetProductsRequest;
+    const categorySlug = data.category_slug || extData.categorySlug;
     if (categorySlug && categorySlug !== 'all') {
       where.category = {
         OR: [
@@ -36,7 +57,7 @@ export class CatalogService {
       };
     }
 
-    const searchQuery = data.search_query || (data as any).searchQuery;
+    const searchQuery = data.search_query || extData.searchQuery;
     if (searchQuery) {
       const q = searchQuery.trim();
       where.OR = [
@@ -46,28 +67,33 @@ export class CatalogService {
       ];
     }
 
-    const minPrice = data.min_price ?? (data as any).minPrice;
+    const minPrice = data.min_price ?? extData.minPrice;
     if (minPrice !== undefined && minPrice !== null) {
-      where.basePrice = { ...(where.basePrice || {}), gte: Number(minPrice) };
+      where.basePrice = { ...((where.basePrice as ProductPrisma.Prisma.DecimalFilter) || {}), gte: Number(minPrice) };
     }
 
-    const maxPrice = data.max_price ?? (data as any).maxPrice;
+    const maxPrice = data.max_price ?? extData.maxPrice;
     if (maxPrice !== undefined && maxPrice !== null) {
-      where.basePrice = { ...(where.basePrice || {}), lte: Number(maxPrice) };
+      where.basePrice = { ...((where.basePrice as ProductPrisma.Prisma.DecimalFilter) || {}), lte: Number(maxPrice) };
     }
 
-    const featuredOnly = data.featured_only ?? (data as any).featuredOnly;
+    const featuredOnly = data.featured_only ?? extData.featuredOnly;
     if (featuredOnly) {
       where.featured = true;
     }
 
-    const flashSaleOnly = data.flash_sale_only ?? (data as any).flashSaleOnly;
+    const flashSaleOnly = data.flash_sale_only ?? extData.flashSaleOnly;
     if (flashSaleOnly) {
       where.isFlashSale = true;
     }
 
-    let orderBy: any = [{ featured: 'desc' }, { createdAt: 'desc' }];
-    const sortBy = data.sort_by || (data as any).sortBy;
+    let orderBy:
+      | ProductPrisma.Prisma.ProductOrderByWithRelationInput
+      | ProductPrisma.Prisma.ProductOrderByWithRelationInput[] = [
+      { featured: 'desc' },
+      { createdAt: 'desc' },
+    ];
+    const sortBy = data.sort_by || extData.sortBy;
     if (sortBy) {
       switch (sortBy) {
         case 'price-asc':
@@ -170,7 +196,7 @@ export class CatalogService {
     };
   }
 
-  private mapProductToDto(p: any): ProductDto {
+  private mapProductToDto(p: ProductWithRelations): ProductDto {
     return {
       id: p.id,
       category_id: p.categoryId,
@@ -191,15 +217,15 @@ export class CatalogService {
       rating: Number(p.rating),
       review_count: p.reviewCount || 0,
       badge: p.badge || undefined,
-      images: p.images ? p.images.map((img: any) => img.imageUrl) : [],
+      images: p.images ? p.images.map((img: ProductPrisma.ProductImage) => img.imageUrl) : [],
       specs: p.specs
-        ? p.specs.map((s: any) => ({
+        ? p.specs.map((s: ProductPrisma.ProductSpec) => ({
             label: s.label,
             value: s.value,
           }))
         : [],
       variants: p.skus
-        ? p.skus.map((sku: any) => ({
+        ? p.skus.map((sku: ProductPrisma.ProductSku) => ({
             id: sku.id,
             sku_code: sku.skuCode,
             name: sku.name,

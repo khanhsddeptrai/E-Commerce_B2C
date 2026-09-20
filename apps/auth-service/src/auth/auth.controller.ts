@@ -24,7 +24,7 @@ export class AuthController {
       const res = await this.authService.register(data);
       console.log('>>> [AuthService.Register] user registered successfully:', res.user.id);
       return res;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('>>> [AuthService.Register] error:', err);
       throw err;
     }

@@ -1,15 +1,22 @@
-import { Product, Category, FilterState } from "@/types/ecommerce";
+import {
+  Product,
+  Category,
+  FilterState,
+  ApiProductDto,
+  ApiCategoryDto,
+  ApiProductSkuDto,
+} from "@/types/ecommerce";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "http://localhost:8000/api/v1";
 
-function mapApiProductToProduct(api: any): Product {
+function mapApiProductToProduct(api: ApiProductDto): Product {
   return {
     id: api.id,
     slug: api.slug,
     name: api.name,
     tagline: api.tagline || "",
     description: api.description,
-    categoryId: api.category_id || api.categoryId,
+    categoryId: api.category_id || api.categoryId || "",
     categoryName: api.category_name || api.categoryName || "",
     brand: api.brand || "NOVA TECH",
     badge: api.badge,
@@ -17,29 +24,29 @@ function mapApiProductToProduct(api: any): Product {
     isFlashSale: Boolean(api.is_flash_sale ?? api.isFlashSale),
     flashSaleSold: api.flash_sale_sold ?? api.flashSaleSold ?? 0,
     flashSaleTotal: api.flash_sale_total ?? api.flashSaleTotal ?? 0,
-    basePrice: Number(api.base_price ?? api.basePrice),
+    basePrice: Number(api.base_price ?? api.basePrice ?? 0),
     originalPrice: api.original_price ?? api.originalPrice ? Number(api.original_price ?? api.originalPrice) : undefined,
-    rating: Number(api.rating),
+    rating: Number(api.rating ?? 5.0),
     reviewCount: Number(api.review_count ?? api.reviewCount ?? 0),
     images: api.images || [],
     specs: api.specs || [],
-    variants: (api.variants || []).map((v: any) => ({
+    variants: (api.variants || []).map((v: ApiProductSkuDto) => ({
       id: v.id,
-      sku: v.sku_code || v.sku,
+      sku: v.sku_code || v.sku || "",
       name: v.name,
-      colorName: v.color_name || v.colorName,
-      colorHex: v.color_hex || v.colorHex,
+      colorName: v.color_name || v.colorName || "",
+      colorHex: v.color_hex || v.colorHex || "#000000",
       specs: typeof v.specs_json === "string" ? JSON.parse(v.specs_json || "{}") : v.specs || {},
       price: Number(v.price),
       originalPrice: v.original_price ?? v.originalPrice ? Number(v.original_price ?? v.originalPrice) : undefined,
       stock: Number(v.stock_quantity ?? v.stock ?? 0),
       image: v.image_url || v.image || "",
     })),
-    createdAt: api.created_at || api.createdAt,
+    createdAt: api.created_at || api.createdAt || new Date().toISOString(),
   };
 }
 
-function mapApiCategoryToCategory(api: any): Category {
+function mapApiCategoryToCategory(api: ApiCategoryDto): Category {
   return {
     id: api.id,
     slug: api.slug,

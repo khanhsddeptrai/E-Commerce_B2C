@@ -17,6 +17,26 @@ import {
   UserProfileResponse,
 } from '@repo/proto';
 
+interface ExtendedRegisterRequest extends RegisterRequest {
+  fullName?: string;
+}
+
+interface ExtendedLoginRequest extends LoginRequest {
+  deviceInfo?: string;
+}
+
+interface ExtendedRefreshTokenRequest extends RefreshTokenRequest {
+  refreshToken?: string;
+}
+
+interface ExtendedValidateTokenRequest extends ValidateTokenRequest {
+  accessToken?: string;
+}
+
+interface ExtendedGetProfileRequest extends GetProfileRequest {
+  userId?: string;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -44,7 +64,8 @@ export class AuthService {
       });
     }
 
-    const fullName = data.full_name || (data as any).fullName;
+    const extData = data as ExtendedRegisterRequest;
+    const fullName = data.full_name || extData.fullName;
     if (!fullName) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
@@ -113,7 +134,8 @@ export class AuthService {
       });
     }
 
-    const deviceInfo = data.device_info || (data as any).deviceInfo;
+    const extData = data as ExtendedLoginRequest;
+    const deviceInfo = data.device_info || extData.deviceInfo;
     const tokens = await this.generateTokens(user.id, user.email, user.role, deviceInfo);
 
     return {
@@ -134,7 +156,8 @@ export class AuthService {
   }
 
   async refreshToken(data: RefreshTokenRequest): Promise<TokenResponse> {
-    const rawToken = data.refresh_token || (data as any).refreshToken;
+    const extData = data as ExtendedRefreshTokenRequest;
+    const rawToken = data.refresh_token || extData.refreshToken;
     if (!rawToken) {
       throw new RpcException({
         code: status.INVALID_ARGUMENT,
@@ -179,7 +202,8 @@ export class AuthService {
 
   async validateToken(data: ValidateTokenRequest): Promise<ValidateTokenResponse> {
     try {
-      const token = data.access_token || (data as any).accessToken;
+      const extData = data as ExtendedValidateTokenRequest;
+      const token = data.access_token || extData.accessToken || '';
       const payload = this.jwtService.verify(token);
       return {
         valid: true,
@@ -187,19 +211,21 @@ export class AuthService {
         email: payload.email,
         role: payload.role,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Token không hợp lệ';
       return {
         valid: false,
         user_id: '',
         email: '',
         role: '',
-        error: err.message || 'Token không hợp lệ',
+        error: errorMsg,
       };
     }
   }
 
   async getProfile(data: GetProfileRequest): Promise<UserProfileResponse> {
-    const userId = data.user_id || (data as any).userId;
+    const extData = data as ExtendedGetProfileRequest;
+    const userId = data.user_id || extData.userId;
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
     });
