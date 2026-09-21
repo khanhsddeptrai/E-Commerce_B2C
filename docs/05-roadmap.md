@@ -19,17 +19,16 @@
 ## Giai Đoạn 2: Quản Lý Sản Phẩm & Giao Diện Mua Sắm (Catalog & Storefront)
 * **Mục tiêu**: Hoàn thiện luồng duyệt sản phẩm, tìm kiếm Meilisearch và giao diện Storefront.
 * **Các công việc cụ thể**:
-  - [ ] Thiết lập `product_db`: Tạo bảng Danh mục, Thương hiệu, Sản phẩm và SKU biến thể.
-  - [ ] Xây dựng **Product Service**: CRUD sản phẩm, phát sự kiện `product.updated` sang RabbitMQ.
+  - [x] Thiết lập `product_db`: Tạo bảng Danh mục, Thương hiệu, Sản phẩm và SKU biến thể.
+  - [x] Xây dựng **Product Service**: gRPC Microservice (:50052) nạp dữ liệu, danh mục và biến thể SKU.
   - [ ] Tích hợp **Meilisearch Worker**: Lắng nghe sự kiện từ RabbitMQ để đánh chỉ mục (Index) tìm kiếm.
-  - [ ] Thiết lập `packages/tailwind-config` & `packages/ui` (Button, Input, ProductCard, Skeleton).
+  - [x] Thiết lập `packages/tailwind-config` & `packages/ui` (Button, Input, ProductCard, Skeleton).
   - [x] Xây dựng **Storefront App (Next.js - apps/storefront)**:
-  - [x] Trang chủ NovaTech (Hero Flagship LDAC, Flash Sale đếm ngược, Danh mục).
-  - [x] Trang danh mục sản phẩm (Bộ lọc giá/danh mục, tìm kiếm, phân loại).
-  - [x] Trang chi tiết sản phẩm (Bộ chọn màu/cấu hình động, bảng thông số kỹ thuật).
-  - [x] Giỏ hàng trượt (Cart Drawer) & Trang đặt hàng (Checkout mô phỏng).
-  - [x] Tầng Mock Data Service (Chuẩn bị sẵn cho việc nối API Gateway).
-
+    - [x] Trang chủ NovaTech (Hero Flagship LDAC, Flash Sale đếm ngược, Danh mục).
+    - [x] Trang danh mục sản phẩm (Bộ lọc giá/danh mục, tìm kiếm, phân loại).
+    - [x] Trang chi tiết sản phẩm (Bộ chọn màu/cấu hình động, bảng thông số kỹ thuật).
+    - [x] Giỏ hàng trượt (Cart Drawer) & Trang đặt hàng (Checkout tích hợp API).
+    - [x] Nối kết trực tiếp API Gateway BFF (:8000).
 
 ---
 
@@ -38,23 +37,27 @@
 * **Các công việc cụ thể**:
   - [x] Xây dựng **Giỏ hàng trên Redis**: Thêm/sửa/xóa sản phẩm bằng Redis Hash (`cart:{userId}` / `cart:{guestSessionId}`).
   - [x] Viết **Redis Lua Script**: Kiểm tra và giữ kho tức thì (`Hold stock`) nguyên tử với TTL 15 phút.
-  - [x] Xây dựng **Order Service**:
-    - [x] Thiết lập `order_db` (Bảng `orders`, `order_items`, `inventory_reservations`).
+  - [x] Xây dựng **Order Service** (:50053):
+    - [x] Thiết lập `order_db` (Bảng `orders`, `order_items`, `inventory_reservations`, `order_status_history`).
     - [x] API tạo đơn hàng (Create Checkout) kèm định dạng mã chuẩn `ORD-YYMMDD-XXXX`.
-    - [ ] Quản lý vòng đời trạng thái đơn hàng (Order State Machine hoàn chỉnh).
+    - [x] Worker định kỳ quét và giải phóng đơn hàng quá hạn 15 phút (`ExpiredOrderWorker`).
+    - [x] Quản lý vòng đời trạng thái đơn hàng (Order State Machine: PENDING $\rightarrow$ CONFIRMED / CANCELLED).
 
 ---
 
 ## Giai Đoạn 4: Thanh Toán, Vận Chuyển & SAGA Orchestration (Payment, Logistics & Consistency)
 * **Mục tiêu**: Tích hợp cổng thanh toán trực tuyến, hoàn thiện quy trình giao dịch phân tán an toàn và hệ thống giả lập vận chuyển thông minh.
 * **Các công việc cụ thể**:
-  - [ ] Xây dựng **Payment Service**:
-    - Thiết lập `payment_db`.
-    - Tích hợp cổng thanh toán giả lập hoặc trực tuyến (VNPAY Sandbox / MoMo / Stripe).
-    - Xử lý **Idempotency Key** và cơ chế xác thực Webhook/IPN.
-  - [ ] Hoàn thiện **SAGA Orchestrator tại Order Service**:
-    - Nhận event `PaymentSucceeded` $\rightarrow$ Xác nhận đơn `CONFIRMED` $\rightarrow$ Trừ kho thật.
-    - Nhận event `PaymentFailed` $\rightarrow$ Hủy đơn `CANCELLED` $\rightarrow$ Nhả kho Redis.
+  - [x] Xây dựng **Payment Service** (:50054):
+    - [x] Thiết lập `payment_db` (Bảng `payments`, `payment_logs` lưu trữ toàn bộ audit payload).
+    - [x] Tích hợp cổng thanh toán trực tuyến **VNPAY Sandbox** (chuẩn hóa URLSearchParams, IPv4, mã băm HMAC-SHA512 và xác thực thẻ nội địa NCB).
+    - [x] Xử lý Idempotency, xác thực Return URL và Webhook/IPN theo chuẩn VNPAY.
+  - [x] Hoàn thiện **SAGA Orchestrator giữa Payment Service & Order Service**:
+    - [x] Thanh toán thành công (`ProcessPaymentSuccess`) $\rightarrow$ Chốt đơn `CONFIRMED`, `paymentStatus = PAID` $\rightarrow$ Chuyển giữ kho từ `HOLD` $\rightarrow$ `COMMITTED` vĩnh viễn.
+    - [x] Thanh toán thất bại / Khách hủy giao dịch (`ProcessPaymentFailed`) $\rightarrow$ Kích hoạt bù trừ (Compensating Transaction) tức thì $\rightarrow$ Chuyển đơn `CANCELLED`, nhả tồn kho Redis (`INCRBY stock:{skuId}`) và chuyển giữ kho sang `RELEASED`.
+  - [x] Tích hợp luồng thanh toán tại **Storefront**:
+    - [x] Tự động sinh liên kết và điều hướng sang VNPAY Sandbox từ trang Checkout.
+    - [x] Trang tiếp nhận và đối soát kết quả giao dịch `/checkout/payment-result` với đầy đủ trạng thái Thành công / Thất bại.
   - [ ] Áp dụng **Transactional Outbox Pattern**: Ngăn chặn tình trạng Dual-Write thất thoát sự kiện.
   - [ ] Xây dựng **Hệ Thống Giả Lập Vận Chuyển (Mock Logistics Simulator - Cách 2)**:
     - **Tầng Dịch Vụ Khách Hàng (Storefront Checkout)**: Cho phép khách chọn gói cước *Giao Tiêu Chuẩn (2-4 ngày)* hoặc *Giao Hỏa Tốc (24h)* thay vì phải chọn từng hãng vận chuyển cụ thể.
@@ -64,7 +67,7 @@
       - Tự động cập nhật `payment_status = PAID` khi đơn COD được giao thành công (`DELIVERED`).
       - Hỗ trợ chế độ Auto-Timeline Simulator (tự động nhảy trạng thái sau mỗi khoảng thời gian định sẵn để demo/kiểm thử).
     - **Giao Diện Theo Dõi Đơn Hàng (Order Tracking Timeline UI)**: Hiển thị tiến trình đơn hàng trực quan từng bước cho khách hàng trên Storefront.
-  - [ ] Hoàn thiện màn hình Checkout và Trang tra cứu lịch sử đơn hàng trên Storefront.
+  - [ ] Xây dựng trang tra cứu lịch sử đơn hàng trên Storefront (`/account/orders`).
 
 ---
 
