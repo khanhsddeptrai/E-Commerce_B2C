@@ -10,6 +10,10 @@ import {
   GetOrdersByCustomerResponse,
   CancelOrderRequest,
   CancelOrderResponse,
+  ProcessPaymentSuccessRequest,
+  ProcessPaymentSuccessResponse,
+  ProcessPaymentFailedRequest,
+  ProcessPaymentFailedResponse,
 } from '@repo/proto';
 
 @Controller()
@@ -34,5 +38,15 @@ export class OrderController {
   @GrpcMethod('OrderService', 'CancelOrder')
   async cancelOrder(data: CancelOrderRequest): Promise<CancelOrderResponse> {
     return this.orderService.cancelOrder(data);
+  }
+
+  @GrpcMethod('OrderService', 'ProcessPaymentSuccess')
+  async processPaymentSuccess(data: ProcessPaymentSuccessRequest): Promise<ProcessPaymentSuccessResponse> {
+    return this.orderService.processPaymentSuccess(data);
+  }
+
+  @GrpcMethod('OrderService', 'ProcessPaymentFailed')
+  async processPaymentFailed(data: ProcessPaymentFailedRequest): Promise<ProcessPaymentFailedResponse> {
+    return this.orderService.processPaymentFailed(data);
   }
 }

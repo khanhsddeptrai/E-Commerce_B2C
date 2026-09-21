@@ -6,7 +6,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "db:generate": "prisma generate",
-    "db:generate:all": "prisma generate && prisma generate --schema=prisma/schema-product.prisma && prisma generate --schema=prisma/schema-order.prisma",
+    "db:generate:all": "prisma generate && prisma generate --schema=prisma/schema-product.prisma && prisma generate --schema=prisma/schema-order.prisma && prisma generate --schema=prisma/schema-payment.prisma",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:product:generate": "prisma generate --schema=prisma/schema-product.prisma",
@@ -14,7 +14,9 @@
     "db:product:seed": "node prisma/seed-products.js",
     "db:product:seed-all": "node prisma/seed-products.js && node prisma/seed-new-items.js && node prisma/seed-aula-variants.js && node prisma/update-aula-images.js",
     "db:order:generate": "prisma generate --schema=prisma/schema-order.prisma",
-    "db:order:migrate": "prisma migrate dev --schema=prisma/schema-order.prisma"
+    "db:order:migrate": "prisma migrate dev --schema=prisma/schema-order.prisma",
+    "db:payment:generate": "prisma generate --schema=prisma/schema-payment.prisma",
+    "db:payment:migrate": "prisma migrate dev --schema=prisma/schema-payment.prisma"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1"

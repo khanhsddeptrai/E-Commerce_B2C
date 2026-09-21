@@ -16,6 +16,7 @@ import {
 import { useCart } from "@/context/CartContext";
 
 import { orderService } from "@/services/orderService";
+import { paymentService } from "@/services/paymentService";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -77,11 +78,29 @@ export default function CheckoutPage() {
     const res = await orderService.createOrder(payload);
 
     if (res.success && res.order) {
-      setOrderSuccess({
-        orderId: res.order.order_code,
-        total: res.order.total_amount,
-      });
-      clearCart();
+      if (paymentMethod === "vnpay") {
+        const paymentRes = await paymentService.createPaymentUrl({
+          order_id: res.order.id,
+          order_code: res.order.order_code,
+          amount: res.order.total_amount,
+          payment_method: "VNPAY",
+          return_url: `${window.location.origin}/checkout/payment-result`,
+        });
+
+        if (paymentRes.success && paymentRes.payment_url) {
+          clearCart();
+          window.location.href = paymentRes.payment_url;
+          return;
+        } else {
+          setErrorMessage(paymentRes.message || "Không thể khởi tạo cổng thanh toán VNPAY");
+        }
+      } else {
+        setOrderSuccess({
+          orderId: res.order.order_code,
+          total: res.order.total_amount,
+        });
+        clearCart();
+      }
     } else {
       setErrorMessage(res.message || "Đặt hàng không thành công. Vui lòng kiểm tra lại tồn kho.");
     }

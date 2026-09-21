@@ -13,6 +13,10 @@ import {
   GetOrdersByCustomerResponse,
   CancelOrderRequest,
   CancelOrderResponse,
+  ProcessPaymentSuccessRequest,
+  ProcessPaymentSuccessResponse,
+  ProcessPaymentFailedRequest,
+  ProcessPaymentFailedResponse,
   OrderDto,
 } from '@repo/proto';
 
@@ -353,6 +357,128 @@ export class OrderService {
     return {
       success: true,
       message: 'Hủy đơn hàng thành công và đã nhả lại tồn kho',
+    };
+  }
+
+  async processPaymentSuccess(data: ProcessPaymentSuccessRequest): Promise<ProcessPaymentSuccessResponse> {
+    const order = await this.prisma.order.findUnique({
+      where: { orderCode: data.order_code },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: `Không tìm thấy đơn hàng mã: ${data.order_code}`,
+      });
+    }
+
+    if (order.paymentStatus === OrderPrisma.PaymentStatus.PAID) {
+      return {
+        success: true,
+        message: 'Đơn hàng đã được ghi nhận thanh toán thành công trước đó',
+        order: this.mapOrderToDto(order),
+      };
+    }
+
+    // SAGA Step: Chốt đơn hàng và chuyển trạng thái giữ kho sang COMMITTED vĩnh viễn
+    const updatedOrder = await this.prisma.$transaction(async (tx) => {
+      const ord = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: OrderPrisma.PaymentStatus.PAID,
+          orderStatus: OrderPrisma.OrderStatus.CONFIRMED,
+          statusHistory: {
+            create: {
+              fromStatus: order.orderStatus,
+              toStatus: OrderPrisma.OrderStatus.CONFIRMED,
+              note: `Thanh toán thành công qua ${data.payment_method || 'VNPAY'} (Mã GD: ${data.transaction_no})`,
+              changedBy: 'PAYMENT_SERVICE',
+            },
+          },
+        },
+        include: { items: true },
+      });
+
+      await tx.inventoryReservation.updateMany({
+        where: {
+          orderId: order.id,
+          status: OrderPrisma.ReservationStatus.HOLD,
+        },
+        data: {
+          status: OrderPrisma.ReservationStatus.COMMITTED,
+          expiresAt: null,
+        },
+      });
+
+      return ord;
+    });
+
+    return {
+      success: true,
+      message: 'Xác nhận thanh toán đơn hàng thành công',
+      order: this.mapOrderToDto(updatedOrder),
+    };
+  }
+
+  async processPaymentFailed(data: ProcessPaymentFailedRequest): Promise<ProcessPaymentFailedResponse> {
+    const order = await this.prisma.order.findUnique({
+      where: { orderCode: data.order_code },
+      include: { items: true },
+    });
+
+    if (!order) {
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: `Không tìm thấy đơn hàng mã: ${data.order_code}`,
+      });
+    }
+
+    if (order.orderStatus === OrderPrisma.OrderStatus.CANCELLED) {
+      return {
+        success: true,
+        message: 'Đơn hàng đã ở trạng thái hủy trước đó',
+      };
+    }
+
+    // SAGA Compensating Transaction:
+    // 1. Nhả lại tồn kho tức thì trên Redis
+    for (const item of order.items) {
+      const stockKey = `stock:${item.skuId}`;
+      const exists = await this.redis.exists(stockKey);
+      if (exists) {
+        await this.redis.incrby(stockKey, item.quantity);
+      }
+    }
+
+    // 2. Cập nhật trạng thái đơn hàng CANCELLED và giải phóng Reservation RELEASED trong PostgreSQL
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: order.id },
+        data: {
+          paymentStatus: OrderPrisma.PaymentStatus.FAILED,
+          orderStatus: OrderPrisma.OrderStatus.CANCELLED,
+          cancelReason: data.reason || 'Thanh toán trực tuyến thất bại hoặc bị hủy bởi người dùng',
+          statusHistory: {
+            create: {
+              fromStatus: order.orderStatus,
+              toStatus: OrderPrisma.OrderStatus.CANCELLED,
+              note: `Thanh toán thất bại: ${data.reason || 'Hủy giao dịch'} - Hệ thống đã nhả lại tồn kho`,
+              changedBy: 'PAYMENT_SERVICE',
+            },
+          },
+        },
+      });
+
+      await tx.inventoryReservation.updateMany({
+        where: { orderId: order.id },
+        data: { status: OrderPrisma.ReservationStatus.RELEASED },
+      });
+    });
+
+    return {
+      success: true,
+      message: 'Hủy đơn hàng và giải phóng giữ kho thành công',
     };
   }
 

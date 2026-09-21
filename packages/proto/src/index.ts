@@ -293,5 +293,93 @@ export interface OrderServiceClient {
   getOrderById(request: GetOrderByIdRequest): Observable<GetOrderByIdResponse>;
   getOrdersByCustomer(request: GetOrdersByCustomerRequest): Observable<GetOrdersByCustomerResponse>;
   cancelOrder(request: CancelOrderRequest): Observable<CancelOrderResponse>;
+  processPaymentSuccess(request: ProcessPaymentSuccessRequest): Observable<ProcessPaymentSuccessResponse>;
+  processPaymentFailed(request: ProcessPaymentFailedRequest): Observable<ProcessPaymentFailedResponse>;
+}
+
+export interface ProcessPaymentSuccessRequest {
+  order_code: string;
+  transaction_no: string;
+  amount: number;
+  payment_method: string;
+}
+
+export interface ProcessPaymentSuccessResponse {
+  success: boolean;
+  message: string;
+  order?: OrderDto;
+}
+
+export interface ProcessPaymentFailedRequest {
+  order_code: string;
+  reason: string;
+}
+
+export interface ProcessPaymentFailedResponse {
+  success: boolean;
+  message: string;
+}
+
+export const PAYMENT_PROTO_PATH = getProtoPath('payment.proto');
+export const PAYMENT_PACKAGE_NAME = 'payment';
+
+export interface CreatePaymentUrlRequest {
+  order_id: string;
+  order_code: string;
+  amount: number;
+  payment_method: string;
+  bank_code?: string;
+  ip_address?: string;
+  return_url?: string;
+}
+
+export interface CreatePaymentUrlResponse {
+  success: boolean;
+  payment_url: string;
+  payment_id: string;
+  message: string;
+}
+
+export interface VerifyPaymentReturnRequest {
+  query_string: string;
+}
+
+export interface VerifyPaymentReturnResponse {
+  is_valid: boolean;
+  is_success: boolean;
+  order_code: string;
+  amount: number;
+  transaction_no: string;
+  bank_code: string;
+  message: string;
+  response_code: string;
+}
+
+export interface ProcessIpnWebhookRequest {
+  query_string: string;
+}
+
+export interface ProcessIpnWebhookResponse {
+  rsp_code: string;
+  message: string;
+}
+
+export interface GetPaymentStatusRequest {
+  order_code: string;
+}
+
+export interface GetPaymentStatusResponse {
+  found: boolean;
+  status: string;
+  payment_method: string;
+  amount: number;
+  transaction_no?: string;
+}
+
+export interface PaymentServiceClient {
+  createPaymentUrl(request: CreatePaymentUrlRequest): Observable<CreatePaymentUrlResponse>;
+  verifyPaymentReturn(request: VerifyPaymentReturnRequest): Observable<VerifyPaymentReturnResponse>;
+  processIpnWebhook(request: ProcessIpnWebhookRequest): Observable<ProcessIpnWebhookResponse>;
+  getPaymentStatus(request: GetPaymentStatusRequest): Observable<GetPaymentStatusResponse>;
 }
 

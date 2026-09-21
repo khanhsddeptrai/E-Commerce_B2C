@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package payment;
+
+service PaymentService {
+  rpc CreatePaymentUrl (CreatePaymentUrlRequest) returns (CreatePaymentUrlResponse);
+  rpc VerifyPaymentReturn (VerifyPaymentReturnRequest) returns (VerifyPaymentReturnResponse);
+  rpc ProcessIpnWebhook (ProcessIpnWebhookRequest) returns (ProcessIpnWebhookResponse);
+  rpc GetPaymentStatus (GetPaymentStatusRequest) returns (GetPaymentStatusResponse);
+}
+
+message CreatePaymentUrlRequest {
+  string order_id = 1;
+  string order_code = 2;
+  double amount = 3;
+  string payment_method = 4;
+  optional string bank_code = 5;
+  optional string ip_address = 6;
+  optional string return_url = 7;
+}
+
+message CreatePaymentUrlResponse {
+  bool success = 1;
+  string payment_url = 2;
+  string payment_id = 3;
+  string message = 4;
+}
+
+message VerifyPaymentReturnRequest {
+  string query_string = 1;
+}
+
+message VerifyPaymentReturnResponse {
+  bool is_valid = 1;
+  bool is_success = 2;
+  string order_code = 3;
+  double amount = 4;
+  string transaction_no = 5;
+  string bank_code = 6;
+  string message = 7;
+  string response_code = 8;
+}
+
+message ProcessIpnWebhookRequest {
+  string query_string = 1;
+}
+
+message ProcessIpnWebhookResponse {
+  string rsp_code = 1;
+  string message = 2;
+}
+
+message GetPaymentStatusRequest {
+  string order_code = 1;
+}
+
+message GetPaymentStatusResponse {
+  bool found = 1;
+  string status = 2;
+  string payment_method = 3;
+  double amount = 4;
+  optional string transaction_no = 5;
+}

@@ -7,6 +7,8 @@ service OrderService {
   rpc GetOrderById (GetOrderByIdRequest) returns (GetOrderByIdResponse);
   rpc GetOrdersByCustomer (GetOrdersByCustomerRequest) returns (GetOrdersByCustomerResponse);
   rpc CancelOrder (CancelOrderRequest) returns (CancelOrderResponse);
+  rpc ProcessPaymentSuccess (ProcessPaymentSuccessRequest) returns (ProcessPaymentSuccessResponse);
+  rpc ProcessPaymentFailed (ProcessPaymentFailedRequest) returns (ProcessPaymentFailedResponse);
 }
 
 message OrderItemInputDto {
@@ -93,6 +95,29 @@ message CancelOrderRequest {
 }
 
 message CancelOrderResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ProcessPaymentSuccessRequest {
+  string order_code = 1;
+  string transaction_no = 2;
+  double amount = 3;
+  string payment_method = 4;
+}
+
+message ProcessPaymentSuccessResponse {
+  bool success = 1;
+  string message = 2;
+  optional OrderDto order = 3;
+}
+
+message ProcessPaymentFailedRequest {
+  string order_code = 1;
+  string reason = 2;
+}
+
+message ProcessPaymentFailedResponse {
   bool success = 1;
   string message = 2;
 }

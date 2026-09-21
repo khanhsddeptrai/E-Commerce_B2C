@@ -1,0 +1,61 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("PAYMENT_DATABASE_URL")
+}
+
+generator paymentClient {
+  provider = "prisma-client-js"
+  output   = "../src/generated/payment-client"
+}
+
+enum PaymentMethod {
+  COD
+  VNPAY
+  MOMO
+  STRIPE
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id              String         @id @default(uuid()) @db.Uuid
+  orderId         String         @map("order_id") @db.Uuid
+  orderCode       String         @map("order_code") @db.VarChar(50)
+  amount          Decimal        @db.Decimal(15, 2)
+  paymentMethod   PaymentMethod  @default(VNPAY) @map("payment_method")
+  status          PaymentStatus  @default(PENDING) @map("status")
+  transactionNo   String?        @map("transaction_no") @db.VarChar(100)
+  bankCode        String?        @map("bank_code") @db.VarChar(50)
+  bankTranNo      String?        @map("bank_tran_no") @db.VarChar(100)
+  cardType        String?        @map("card_type") @db.VarChar(50)
+  vnpResponseCode String?        @map("vnp_response_code") @db.VarChar(10)
+  payDate         DateTime?      @map("pay_date")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  logs            PaymentLog[]
+
+  @@map("payments")
+  @@index([orderId])
+  @@index([orderCode])
+  @@index([status])
+}
+
+model PaymentLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  paymentId  String   @map("payment_id") @db.Uuid
+  action     String   @db.VarChar(50)
+  rawPayload Json     @map("raw_payload") @db.JsonB
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  payment    Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  @@map("payment_logs")
+  @@index([paymentId])
+  @@index([action])
+}
