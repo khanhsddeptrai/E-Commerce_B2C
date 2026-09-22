@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
+import Redis from 'ioredis';
 import { PrismaProductService } from '../prisma/prisma-product.service';
 import { ProductPrisma } from '@repo/database';
 import {
@@ -34,8 +35,19 @@ type ProductWithRelations = ProductPrisma.Prisma.ProductGetPayload<{
 }>;
 
 @Injectable()
-export class CatalogService {
-  constructor(private readonly prisma: PrismaProductService) {}
+export class CatalogService implements OnModuleDestroy {
+  private readonly redis: Redis;
+
+  constructor(private readonly prisma: PrismaProductService) {
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    this.redis = new Redis(redisUrl, {
+      maxRetriesPerRequest: 3,
+    });
+  }
+
+  onModuleDestroy(): void {
+    this.redis.disconnect();
+  }
 
   async getProducts(data: GetProductsRequest): Promise<GetProductsResponse> {
     const page = Math.max(1, Number(data.page) || 1);
@@ -132,8 +144,11 @@ export class CatalogService {
       }),
     ]);
 
+    const allSkus = products.flatMap((p) => p.skus || []);
+    const liveStockMap = await this.resolveSkuStocks(allSkus);
+
     return {
-      products: products.map((p) => this.mapProductToDto(p)),
+      products: products.map((p) => this.mapProductToDto(p, liveStockMap)),
       total,
       page,
       limit,
@@ -167,8 +182,10 @@ export class CatalogService {
       });
     }
 
+    const liveStockMap = await this.resolveSkuStocks(product.skus || []);
+
     return {
-      product: this.mapProductToDto(product),
+      product: this.mapProductToDto(product, liveStockMap),
     };
   }
 
@@ -196,7 +213,50 @@ export class CatalogService {
     };
   }
 
-  private mapProductToDto(p: ProductWithRelations): ProductDto {
+  private async resolveSkuStocks(
+    skus: ProductPrisma.ProductSku[],
+  ): Promise<Map<string, number>> {
+    const stockMap = new Map<string, number>();
+    if (!skus || skus.length === 0) return stockMap;
+
+    try {
+      const keys = skus.map((s) => `stock:${s.id}`);
+      const results = await this.redis.mget(...keys);
+
+      const missingSkus: ProductPrisma.ProductSku[] = [];
+
+      for (let i = 0; i < skus.length; i++) {
+        const sku = skus[i];
+        if (!sku) continue;
+        const val = results[i];
+        if (val !== null && val !== undefined) {
+          stockMap.set(sku.id, Math.max(0, Number(val)));
+        } else {
+          stockMap.set(sku.id, sku.stockQuantity);
+          missingSkus.push(sku);
+        }
+      }
+
+      if (missingSkus.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const sku of missingSkus) {
+          pipeline.set(`stock:${sku.id}`, sku.stockQuantity);
+        }
+        await pipeline.exec().catch(() => {});
+      }
+    } catch {
+      for (const sku of skus) {
+        stockMap.set(sku.id, sku.stockQuantity);
+      }
+    }
+
+    return stockMap;
+  }
+
+  private mapProductToDto(
+    p: ProductWithRelations,
+    liveStockMap?: Map<string, number>,
+  ): ProductDto {
     return {
       id: p.id,
       category_id: p.categoryId,
@@ -233,7 +293,7 @@ export class CatalogService {
             color_hex: sku.colorHex,
             price: Number(sku.price),
             original_price: sku.originalPrice ? Number(sku.originalPrice) : undefined,
-            stock_quantity: sku.stockQuantity,
+            stock_quantity: liveStockMap?.get(sku.id) ?? sku.stockQuantity,
             image_url: sku.imageUrl || undefined,
             specs_json: sku.specs ? JSON.stringify(sku.specs) : '{}',
           }))

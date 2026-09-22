@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -12,15 +12,28 @@ import {
   Truck,
   Wallet,
   ShoppingBag,
+  Clock,
+  ExternalLink,
+  RotateCcw,
+  Loader2,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
-
+import { CartItem } from "@/types/ecommerce";
 import { orderService } from "@/services/orderService";
 import { paymentService } from "@/services/paymentService";
 
+interface PendingVnpayOrder {
+  orderId: string;
+  orderCode: string;
+  paymentUrl: string;
+  total: number;
+  createdAt: number;
+  items: CartItem[];
+}
+
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, subtotal, discount, shipping, total, clearCart, voucherCode } = useCart();
+  const { items, subtotal, discount, shipping, total, clearCart, restoreCart, voucherCode } = useCart();
 
   const [paymentMethod, setPaymentMethod] = useState<"vnpay" | "momo" | "card" | "cod">("vnpay");
   const [formData, setFormData] = useState({
@@ -39,6 +52,144 @@ export default function CheckoutPage() {
     orderId: string;
     total: number;
   } | null>(null);
+
+  const [pendingOrders, setPendingOrders] = useState<PendingVnpayOrder[]>([]);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
+  const [isCancellingAll, setIsCancellingAll] = useState(false);
+
+  // Kiểm tra danh sách đơn hàng VNPAY đang chờ thanh toán nếu người dùng bấm Back từ VNPAY
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    let ordersToCheck: PendingVnpayOrder[] = [];
+    const savedList = localStorage.getItem("novatech_pending_vnpay_orders");
+    if (savedList) {
+      try {
+        const parsed = JSON.parse(savedList);
+        if (Array.isArray(parsed)) {
+          ordersToCheck = parsed;
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // Tương thích ngược nếu còn lưu dạng đơn lẻ
+    const legacySingle = localStorage.getItem("novatech_pending_vnpay_order");
+    if (legacySingle) {
+      try {
+        const single = JSON.parse(legacySingle);
+        if (single && single.orderId && !ordersToCheck.some((o) => o.orderId === single.orderId)) {
+          ordersToCheck.push(single);
+        }
+      } catch {
+        // ignore
+      }
+      localStorage.removeItem("novatech_pending_vnpay_order");
+    }
+
+    if (ordersToCheck.length === 0) return;
+
+    const now = Date.now();
+    // Lọc bỏ các đơn đã quá 15 phút
+    const validTimeOrders = ordersToCheck.filter((o) => now - o.createdAt < 15 * 60 * 1000);
+
+    if (validTimeOrders.length === 0) {
+      localStorage.removeItem("novatech_pending_vnpay_orders");
+      return;
+    }
+
+    // Xác thực trạng thái thời gian thực của từng đơn từ server
+    void Promise.all(
+      validTimeOrders.map(async (po) => {
+        try {
+          const ord = await orderService.getOrderById(po.orderId);
+          if (ord && ord.order_status === "PENDING" && ord.payment_status === "PENDING") {
+            return po;
+          }
+        } catch {
+          return null;
+        }
+        return null;
+      })
+    ).then((results) => {
+      const activePending = results.filter((r): r is PendingVnpayOrder => r !== null);
+      setPendingOrders(activePending);
+      if (activePending.length > 0) {
+        localStorage.setItem("novatech_pending_vnpay_orders", JSON.stringify(activePending));
+      } else {
+        localStorage.removeItem("novatech_pending_vnpay_orders");
+      }
+    });
+  }, []);
+
+  const handleResumeVnpay = (url: string) => {
+    window.location.href = url;
+  };
+
+  const handleCancelSingleOrder = async (order: PendingVnpayOrder) => {
+    setCancellingOrderId(order.orderId);
+    setErrorMessage(null);
+    try {
+      const cancelRes = await orderService.cancelOrder(
+        order.orderId,
+        "Khách hàng hủy đơn đang chờ thanh toán để đặt lại"
+      );
+      if (cancelRes.success) {
+        // Nếu giỏ hàng hiện tại đang trống, khôi phục lại các món của đơn này
+        if (items.length === 0 && order.items && order.items.length > 0) {
+          restoreCart(order.items);
+        }
+        setPendingOrders((prev) => {
+          const updated = prev.filter((o) => o.orderId !== order.orderId);
+          if (typeof window !== "undefined") {
+            if (updated.length > 0) {
+              localStorage.setItem("novatech_pending_vnpay_orders", JSON.stringify(updated));
+            } else {
+              localStorage.removeItem("novatech_pending_vnpay_orders");
+            }
+          }
+          return updated;
+        });
+      } else {
+        setErrorMessage(cancelRes.message || `Không thể hủy đơn ${order.orderCode}`);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Lỗi kết nối khi hủy đơn";
+      setErrorMessage(msg);
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
+
+  const handleCancelAllOrders = async () => {
+    if (pendingOrders.length === 0) return;
+    setIsCancellingAll(true);
+    setErrorMessage(null);
+    try {
+      await Promise.all(
+        pendingOrders.map((o) =>
+          orderService.cancelOrder(o.orderId, "Khách hàng hủy đơn đang chờ thanh toán để đặt lại")
+        )
+      );
+
+      // Khôi phục lại giỏ hàng từ đơn gần nhất nếu giỏ hàng hiện tại đang trống
+      const lastOrder = pendingOrders[pendingOrders.length - 1];
+      if (items.length === 0 && lastOrder && lastOrder.items && lastOrder.items.length > 0) {
+        restoreCart(lastOrder.items);
+      }
+
+      setPendingOrders([]);
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("novatech_pending_vnpay_orders");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Lỗi kết nối khi hủy các đơn hàng";
+      setErrorMessage(msg);
+    } finally {
+      setIsCancellingAll(false);
+    }
+  };
 
   const formatPrice = (p: number) => {
     return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(p);
@@ -78,16 +229,39 @@ export default function CheckoutPage() {
     const res = await orderService.createOrder(payload);
 
     if (res.success && res.order) {
+      const createdOrder = res.order;
       if (paymentMethod === "vnpay") {
         const paymentRes = await paymentService.createPaymentUrl({
-          order_id: res.order.id,
-          order_code: res.order.order_code,
-          amount: res.order.total_amount,
+          order_id: createdOrder.id,
+          order_code: createdOrder.order_code,
+          amount: createdOrder.total_amount,
           payment_method: "VNPAY",
           return_url: `${window.location.origin}/checkout/payment-result`,
         });
 
         if (paymentRes.success && paymentRes.payment_url) {
+          // Lưu đơn chờ thanh toán vào danh sách localStorage để khôi phục nếu bấm Browser Back
+          if (typeof window !== "undefined") {
+            try {
+              const saved = localStorage.getItem("novatech_pending_vnpay_orders");
+              const existing: PendingVnpayOrder[] = saved ? JSON.parse(saved) : [];
+              const now = Date.now();
+              const valid = Array.isArray(existing)
+                ? existing.filter((o) => now - o.createdAt < 15 * 60 * 1000 && o.orderId !== createdOrder.id)
+                : [];
+              valid.push({
+                orderId: createdOrder.id,
+                orderCode: createdOrder.order_code,
+                paymentUrl: paymentRes.payment_url,
+                total: createdOrder.total_amount,
+                createdAt: now,
+                items: items,
+              });
+              localStorage.setItem("novatech_pending_vnpay_orders", JSON.stringify(valid));
+            } catch {
+              // ignore
+            }
+          }
           clearCart();
           window.location.href = paymentRes.payment_url;
           return;
@@ -96,8 +270,8 @@ export default function CheckoutPage() {
         }
       } else {
         setOrderSuccess({
-          orderId: res.order.order_code,
-          total: res.order.total_amount,
+          orderId: createdOrder.order_code,
+          total: createdOrder.total_amount,
         });
         clearCart();
       }
@@ -118,6 +292,127 @@ export default function CheckoutPage() {
           <ArrowLeft className="w-4 h-4" /> Tiếp tục xem sản phẩm
         </Link>
       </div>
+
+      {/* Pending VNPAY Orders Recovery Banner - Single Order */}
+      {pendingOrders.length === 1 && (
+        <div className="mb-8 p-6 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-3xl shadow-lg shadow-amber-500/5 space-y-4 animate-in fade-in-50 duration-300">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Bạn có đơn hàng đang chờ thanh toán qua VNPAY
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Mã đơn: <span className="font-mono font-bold text-indigo-600">{pendingOrders[0].orderCode}</span> • Tổng số tiền: <span className="font-bold text-slate-900">{formatPrice(pendingOrders[0].total)}</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => handleResumeVnpay(pendingOrders[0].paymentUrl)}
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition-all shadow-md shadow-indigo-600/20"
+              >
+                <ExternalLink className="w-4 h-4" /> Tiếp tục thanh toán VNPAY
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCancelSingleOrder(pendingOrders[0])}
+                disabled={cancellingOrderId === pendingOrders[0].orderId}
+                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-rose-50 border border-rose-200 text-rose-600 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+              >
+                {cancellingOrderId === pendingOrders[0].orderId ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="w-4 h-4" />
+                )}
+                Hủy đơn & Đặt lại
+              </button>
+            </div>
+          </div>
+          <div className="text-[11px] text-amber-800/80 bg-amber-100/60 p-3 rounded-xl flex items-center gap-2">
+            <span>ℹ️ Hệ thống đang tạm giữ kho cho đơn hàng này. Nếu muốn thay đổi sản phẩm hoặc đặt lại, vui lòng bấm <b>Hủy đơn & Đặt lại</b> để khôi phục lại giỏ hàng và nhả kho ngay lập tức.</span>
+          </div>
+        </div>
+      )}
+
+      {/* Pending VNPAY Orders Recovery Banner - Multiple Orders */}
+      {pendingOrders.length > 1 && (
+        <div className="mb-8 p-6 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-3xl shadow-lg shadow-amber-500/5 space-y-4 animate-in fade-in-50 duration-300">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-3 border-b border-amber-200/70">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Bạn có {pendingOrders.length} đơn hàng đang chờ thanh toán qua VNPAY
+                </h3>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  Các đơn hàng này đang giữ kho tạm thời. Bạn có thể chọn thanh toán tiếp hoặc hủy để giải phóng kho.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleCancelAllOrders}
+              disabled={isCancellingAll}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-xl transition-all shadow-md shadow-rose-600/20 disabled:opacity-50 shrink-0"
+            >
+              {isCancellingAll ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RotateCcw className="w-4 h-4" />
+              )}
+              Hủy tất cả ({pendingOrders.length}) đơn chờ
+            </button>
+          </div>
+
+          <div className="divide-y divide-amber-200/50 space-y-3">
+            {pendingOrders.map((po) => (
+              <div key={po.orderId} className="pt-3 first:pt-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="text-xs space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-indigo-700 text-sm">{po.orderCode}</span>
+                    <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-semibold">Chờ thanh toán</span>
+                  </div>
+                  <div className="text-slate-600">
+                    Tổng tiền: <span className="font-bold text-slate-900">{formatPrice(po.total)}</span> • {po.items?.length || 1} món hàng
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => handleResumeVnpay(po.paymentUrl)}
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl transition-all shadow-sm"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" /> Thanh toán
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleCancelSingleOrder(po)}
+                    disabled={cancellingOrderId === po.orderId}
+                    className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white hover:bg-rose-50 border border-rose-200 text-rose-600 text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+                  >
+                    {cancellingOrderId === po.orderId ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    )}
+                    Hủy đơn
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {orderSuccess ? (
         /* ORDER SUCCESS MODAL / SCREEN */
@@ -172,19 +467,27 @@ export default function CheckoutPage() {
           </button>
         </div>
       ) : items.length === 0 ? (
-        /* EMPTY CART REDIRECT */
+        /* EMPTY CART REDIRECT OR PENDING ORDER NOTICE */
         <div className="text-center py-16 bg-white rounded-3xl border border-slate-200 max-w-md mx-auto p-8 space-y-4">
           <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mx-auto">
             <ShoppingBag className="w-7 h-7" />
           </div>
-          <h2 className="text-lg font-bold text-slate-900">Giỏ hàng của bạn đang trống</h2>
-          <p className="text-xs text-slate-500">Vui lòng chọn ít nhất một sản phẩm để tiến hành đặt hàng.</p>
-          <Link
-            href="/products"
-            className="inline-block px-5 py-2.5 bg-indigo-600 text-white text-xs font-semibold rounded-xl"
-          >
-            Khám Phá Sản Phẩm
-          </Link>
+          <h2 className="text-lg font-bold text-slate-900">
+            {pendingOrders.length > 0 ? "Đơn hàng đang chờ thanh toán" : "Giỏ hàng của bạn đang trống"}
+          </h2>
+          <p className="text-xs text-slate-500">
+            {pendingOrders.length > 0
+              ? "Bạn vừa rời khỏi cổng thanh toán VNPAY. Vui lòng chọn Tiếp tục thanh toán hoặc Hủy đơn để lấy lại sản phẩm vào giỏ hàng."
+              : "Vui lòng chọn ít nhất một sản phẩm để tiến hành đặt hàng."}
+          </p>
+          {pendingOrders.length === 0 && (
+            <Link
+              href="/products"
+              className="inline-block px-5 py-2.5 bg-indigo-600 text-white text-xs font-semibold rounded-xl"
+            >
+              Khám Phá Sản Phẩm
+            </Link>
+          )}
         </div>
       ) : (
         /* CHECKOUT FORM & SUMMARY */

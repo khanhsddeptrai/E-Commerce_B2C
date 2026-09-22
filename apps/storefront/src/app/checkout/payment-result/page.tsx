@@ -20,6 +20,7 @@ function PaymentResultContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<VerifyPaymentResult | null>(null);
+  const hasVerifiedRef = React.useRef(false);
 
   useEffect(() => {
     const queryString = searchParams.toString();
@@ -28,10 +29,32 @@ function PaymentResultContent() {
       return;
     }
 
+    if (hasVerifiedRef.current) {
+      return;
+    }
+    hasVerifiedRef.current = true;
+
     async function verify() {
       const data = await paymentService.verifyPaymentReturn(queryString);
       setResult(data);
       setLoading(false);
+      if (typeof window !== "undefined") {
+        try {
+          const saved = localStorage.getItem("novatech_pending_vnpay_orders");
+          if (saved) {
+            const list: { orderCode: string }[] = JSON.parse(saved);
+            const remaining = list.filter((item) => item.orderCode !== data.order_code);
+            if (remaining.length > 0) {
+              localStorage.setItem("novatech_pending_vnpay_orders", JSON.stringify(remaining));
+            } else {
+              localStorage.removeItem("novatech_pending_vnpay_orders");
+            }
+          }
+        } catch {
+          // ignore
+        }
+        localStorage.removeItem("novatech_pending_vnpay_order");
+      }
     }
 
     void verify();

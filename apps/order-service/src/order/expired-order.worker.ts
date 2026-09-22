@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import Redis from 'ioredis';
-import { OrderPrisma } from '@repo/database';
+import { OrderPrisma, ProductPrismaClient } from '@repo/database';
 import { PrismaOrderService } from '../prisma/prisma-order.service';
 
 @Injectable()
@@ -9,11 +9,22 @@ export class ExpiredOrderWorker implements OnModuleInit, OnModuleDestroy {
   private timer: NodeJS.Timeout | null = null;
   private isProcessing = false;
   private readonly redis: Redis;
+  private readonly productPrisma: ProductPrismaClient;
 
   constructor(private readonly prisma: PrismaOrderService) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redis = new Redis(redisUrl, {
       maxRetriesPerRequest: 3,
+    });
+
+    this.productPrisma = new ProductPrismaClient({
+      datasources: {
+        db: {
+          url:
+            process.env.PRODUCT_DATABASE_URL ||
+            'postgresql://postgres:postgrespassword@localhost:5432/product_db?schema=public',
+        },
+      },
     });
   }
 
@@ -66,18 +77,16 @@ export class ExpiredOrderWorker implements OnModuleInit, OnModuleDestroy {
       const orderIdsToCancel = new Set<string>();
 
       for (const res of expiredList) {
-        // 1. Cập nhật reservation sang RELEASED
-        await this.prisma.inventoryReservation.update({
-          where: { id: res.id },
+        // 1. Cập nhật reservation sang RELEASED chỉ khi đang ở HOLD
+        const releaseResult = await this.prisma.inventoryReservation.updateMany({
+          where: { id: res.id, status: OrderPrisma.ReservationStatus.HOLD },
           data: { status: OrderPrisma.ReservationStatus.RELEASED },
         });
 
-        // 2. Hoàn lại số lượng tồn kho trên Redis
-        const stockKey = `stock:${res.skuId}`;
-        const exists = await this.redis.exists(stockKey);
-        if (exists) {
-          await this.redis.incrby(stockKey, res.quantity);
-          this.logger.log(`Đã hoàn kho Redis: ${stockKey} +${res.quantity}`);
+        // 2. Chỉ hoàn lại tồn kho trên Redis nếu bản ghi thực sự vừa được giải phóng
+        if (releaseResult.count > 0) {
+          await this.safeRestoreRedisStock(res.skuId, res.quantity);
+          this.logger.log(`Đã hoàn kho Redis: stock:${res.skuId} +${res.quantity}`);
         }
 
         // 3. Gom các orderId cần hủy
@@ -118,6 +127,29 @@ export class ExpiredOrderWorker implements OnModuleInit, OnModuleDestroy {
       return 0;
     } finally {
       this.isProcessing = false;
+    }
+  }
+
+  private async safeRestoreRedisStock(skuId: string, quantity: number): Promise<void> {
+    try {
+      const stockKey = `stock:${skuId}`;
+      const sku = await this.productPrisma.productSku.findUnique({
+        where: { id: skuId },
+        select: { stockQuantity: true },
+      });
+
+      const maxStock = sku?.stockQuantity ?? 1000;
+      const currentVal = await this.redis.get(stockKey);
+
+      if (currentVal !== null && currentVal !== undefined) {
+        const currentStock = Number(currentVal);
+        const newStock = Math.min(currentStock + quantity, maxStock);
+        await this.redis.set(stockKey, newStock);
+      } else {
+        await this.redis.set(stockKey, maxStock);
+      }
+    } catch (err: unknown) {
+      this.logger.error(`Lỗi hoàn kho cho SKU ${skuId}:`, err);
     }
   }
 }

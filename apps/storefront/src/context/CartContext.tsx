@@ -13,6 +13,7 @@ interface CartContextType {
   removeFromCart: (variantId: string) => void;
   updateQuantity: (variantId: string, quantity: number) => void;
   clearCart: () => void;
+  restoreCart: (restoredItems: CartItem[]) => void;
   totalItems: number;
   subtotal: number;
   discount: number;
@@ -150,6 +151,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     cartService.clearCart();
   };
 
+  const restoreCart = (restoredItems: CartItem[]) => {
+    setItems(restoredItems);
+  };
+
   const applyVoucher = (code: string) => {
     const clean = code.trim().toUpperCase();
     if (clean === "NOVATECH10") {
@@ -182,6 +187,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         removeFromCart,
         updateQuantity,
         clearCart,
+        restoreCart,
         totalItems,
         subtotal,
         discount,

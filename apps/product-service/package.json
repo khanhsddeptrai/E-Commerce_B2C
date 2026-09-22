@@ -17,6 +17,7 @@
     "@repo/database": "workspace:*",
     "@repo/proto": "workspace:*",
     "dotenv": "^16.4.7",
+    "ioredis": "^6.0.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },

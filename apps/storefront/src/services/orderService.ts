@@ -55,4 +55,24 @@ export const orderService = {
     }
     return null;
   },
+
+  async cancelOrder(orderId: string, reason?: string): Promise<{ success: boolean; message: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(orderId)}/cancel`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ reason: reason || "Khách hàng hủy để đặt lại" }),
+      });
+      const data = await res.json();
+      return {
+        success: Boolean(data.success),
+        message: data.message || "",
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Lỗi kết nối";
+      return { success: false, message: msg };
+    }
+  },
 };

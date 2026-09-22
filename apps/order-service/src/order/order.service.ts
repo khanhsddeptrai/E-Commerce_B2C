@@ -254,6 +254,20 @@ export class OrderService {
       return createdOrder;
     });
 
+    // Với đơn COD (xác nhận ngay), trừ cứng tồn kho vật lý trong PostgreSQL product_db
+    if (isCod) {
+      for (const item of data.items) {
+        await this.productPrisma.productSku.update({
+          where: { id: item.sku_id },
+          data: {
+            stockQuantity: {
+              decrement: item.quantity,
+            },
+          },
+        });
+      }
+    }
+
     return {
       success: true,
       message: 'Đặt hàng thành công',
@@ -325,13 +339,8 @@ export class OrderService {
       });
     }
 
-    // Nhả lại tồn kho trên Redis
-    for (const item of order.items) {
-      await this.redis.incrby(`stock:${item.skuId}`, item.quantity);
-    }
-
-    // Cập nhật trạng thái trong PostgreSQL
-    await this.prisma.$transaction(async (tx) => {
+    // Cập nhật trạng thái trong PostgreSQL và giải phóng reservation nguyên tử
+    const releasedCount = await this.prisma.$transaction(async (tx) => {
       await tx.order.update({
         where: { id: order.id },
         data: {
@@ -348,11 +357,34 @@ export class OrderService {
         },
       });
 
-      await tx.inventoryReservation.updateMany({
-        where: { orderId: order.id },
-        data: { status: 'RELEASED' },
+      const res = await tx.inventoryReservation.updateMany({
+        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
+        data: { status: OrderPrisma.ReservationStatus.RELEASED },
       });
+
+      return res.count;
     });
+
+    // Chỉ hoàn lại tồn kho trên Redis nếu reservation thực sự vừa được chuyển từ HOLD sang RELEASED
+    if (releasedCount > 0) {
+      for (const item of order.items) {
+        await this.safeRestoreRedisStock(item.skuId, item.quantity);
+      }
+    }
+
+    // Nếu đơn hàng đã từng được CONFIRMED (đã trừ kho vật lý), hoàn lại tồn kho trong PostgreSQL
+    if (order.orderStatus === OrderPrisma.OrderStatus.CONFIRMED) {
+      for (const item of order.items) {
+        await this.productPrisma.productSku.update({
+          where: { id: item.skuId },
+          data: {
+            stockQuantity: {
+              increment: item.quantity,
+            },
+          },
+        });
+      }
+    }
 
     return {
       success: true,
@@ -414,6 +446,18 @@ export class OrderService {
       return ord;
     });
 
+    // SAGA: Thanh toán trực tuyến thành công -> trừ cứng tồn kho vật lý trong PostgreSQL product_db
+    for (const item of order.items) {
+      await this.productPrisma.productSku.update({
+        where: { id: item.skuId },
+        data: {
+          stockQuantity: {
+            decrement: item.quantity,
+          },
+        },
+      });
+    }
+
     return {
       success: true,
       message: 'Xác nhận thanh toán đơn hàng thành công',
@@ -441,18 +485,8 @@ export class OrderService {
       };
     }
 
-    // SAGA Compensating Transaction:
-    // 1. Nhả lại tồn kho tức thì trên Redis
-    for (const item of order.items) {
-      const stockKey = `stock:${item.skuId}`;
-      const exists = await this.redis.exists(stockKey);
-      if (exists) {
-        await this.redis.incrby(stockKey, item.quantity);
-      }
-    }
-
-    // 2. Cập nhật trạng thái đơn hàng CANCELLED và giải phóng Reservation RELEASED trong PostgreSQL
-    await this.prisma.$transaction(async (tx) => {
+    // 1. Cập nhật trạng thái đơn hàng CANCELLED và giải phóng Reservation RELEASED trong PostgreSQL
+    const releasedCount = await this.prisma.$transaction(async (tx) => {
       await tx.order.update({
         where: { id: order.id },
         data: {
@@ -470,16 +504,52 @@ export class OrderService {
         },
       });
 
-      await tx.inventoryReservation.updateMany({
-        where: { orderId: order.id },
+      const res = await tx.inventoryReservation.updateMany({
+        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
         data: { status: OrderPrisma.ReservationStatus.RELEASED },
       });
+
+      return res.count;
     });
+
+    // 2. SAGA Compensating: Chỉ nhả tồn kho Redis nếu reservation vừa được giải phóng từ HOLD -> RELEASED
+    if (releasedCount > 0) {
+      for (const item of order.items) {
+        await this.safeRestoreRedisStock(item.skuId, item.quantity);
+      }
+    }
 
     return {
       success: true,
       message: 'Hủy đơn hàng và giải phóng giữ kho thành công',
     };
+  }
+
+  /**
+   * Hoàn lại tồn kho trên Redis có chặn trần (Ceiling Guard)
+   * Không bao giờ để Redis vượt quá tồn kho vật lý trong PostgreSQL
+   */
+  private async safeRestoreRedisStock(skuId: string, quantity: number): Promise<void> {
+    try {
+      const stockKey = `stock:${skuId}`;
+      const sku = await this.productPrisma.productSku.findUnique({
+        where: { id: skuId },
+        select: { stockQuantity: true },
+      });
+
+      const maxStock = sku?.stockQuantity ?? 1000;
+      const currentVal = await this.redis.get(stockKey);
+
+      if (currentVal !== null && currentVal !== undefined) {
+        const currentStock = Number(currentVal);
+        const newStock = Math.min(currentStock + quantity, maxStock);
+        await this.redis.set(stockKey, newStock);
+      } else {
+        await this.redis.set(stockKey, maxStock);
+      }
+    } catch (err: unknown) {
+      console.error(`[safeRestoreRedisStock] Lỗi hoàn kho cho SKU ${skuId}:`, err);
+    }
   }
 
   private mapOrderToDto(order: OrderWithItems): OrderDto {
