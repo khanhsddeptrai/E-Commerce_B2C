@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -47,6 +47,7 @@ export default function CheckoutPage() {
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [orderSuccess, setOrderSuccess] = useState<{
     orderId: string;
@@ -57,8 +58,8 @@ export default function CheckoutPage() {
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   const [isCancellingAll, setIsCancellingAll] = useState(false);
 
-  // Kiểm tra danh sách đơn hàng VNPAY đang chờ thanh toán nếu người dùng bấm Back từ VNPAY
-  useEffect(() => {
+  // Quét và cập nhật đơn hàng VNPAY đang chờ thanh toán
+  const checkPendingOrders = useCallback(() => {
     if (typeof window === "undefined") return;
 
     let ordersToCheck: PendingVnpayOrder[] = [];
@@ -88,18 +89,25 @@ export default function CheckoutPage() {
       localStorage.removeItem("novatech_pending_vnpay_order");
     }
 
-    if (ordersToCheck.length === 0) return;
+    if (ordersToCheck.length === 0) {
+      setPendingOrders([]);
+      return;
+    }
 
     const now = Date.now();
     // Lọc bỏ các đơn đã quá 15 phút
     const validTimeOrders = ordersToCheck.filter((o) => now - o.createdAt < 15 * 60 * 1000);
 
     if (validTimeOrders.length === 0) {
+      setPendingOrders([]);
       localStorage.removeItem("novatech_pending_vnpay_orders");
       return;
     }
 
-    // Xác thực trạng thái thời gian thực của từng đơn từ server
+    // 1. Cập nhật state NGAY LẬP TỨC từ localStorage (0ms latency, hiển thị ngay không cần F5)
+    setPendingOrders(validTimeOrders);
+
+    // 2. Chạy xác thực ngầm với server để lọc các đơn đã thanh toán hoặc đã hủy
     void Promise.all(
       validTimeOrders.map(async (po) => {
         try {
@@ -108,7 +116,7 @@ export default function CheckoutPage() {
             return po;
           }
         } catch {
-          return null;
+          return po;
         }
         return null;
       })
@@ -122,6 +130,31 @@ export default function CheckoutPage() {
       }
     });
   }, []);
+
+  // Lắng nghe cả mount, pageshow (BFCache back button), và visibilitychange
+  useEffect(() => {
+    checkPendingOrders();
+
+    const handleResetAndCheck = () => {
+      setIsRedirecting(false);
+      setIsSubmitting(false);
+      checkPendingOrders();
+    };
+
+    window.addEventListener("pageshow", handleResetAndCheck);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        handleResetAndCheck();
+      }
+    });
+    window.addEventListener("focus", handleResetAndCheck);
+
+    return () => {
+      window.removeEventListener("pageshow", handleResetAndCheck);
+      document.removeEventListener("visibilitychange", handleResetAndCheck);
+      window.removeEventListener("focus", handleResetAndCheck);
+    };
+  }, [checkPendingOrders]);
 
   const handleResumeVnpay = (url: string) => {
     window.location.href = url;
@@ -258,10 +291,12 @@ export default function CheckoutPage() {
                 items: items,
               });
               localStorage.setItem("novatech_pending_vnpay_orders", JSON.stringify(valid));
+              // Không gọi setPendingOrders ở đây để tránh chớp banner đơn chờ trước khi chuyển trang
             } catch {
               // ignore
             }
           }
+          setIsRedirecting(true);
           clearCart();
           window.location.href = paymentRes.payment_url;
           return;
@@ -280,6 +315,24 @@ export default function CheckoutPage() {
     }
     setIsSubmitting(false);
   };
+
+  if (isRedirecting) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
+        <div className="max-w-md mx-auto bg-white rounded-3xl border border-slate-200/80 p-8 text-center shadow-xl shadow-indigo-500/5 space-y-5 animate-in fade-in-50 duration-300">
+          <div className="w-16 h-16 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto shadow-sm">
+            <Loader2 className="w-8 h-8 animate-spin" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-xl font-bold text-slate-900">Đang chuyển sang cổng VNPAY...</h2>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Hệ thống đang chuyển hướng bạn sang cổng thanh toán an toàn của VNPAY. Vui lòng không đóng hoặc tải lại trang.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
