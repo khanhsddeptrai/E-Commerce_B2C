@@ -66,8 +66,14 @@
       - Endpoint giả lập Webhook từ hãng giao vận (`POST /api/v1/mock/carrier/update-status`) cho phép Dev/Admin mô phỏng các sự kiện: `PICKED_UP` $\rightarrow$ `IN_TRANSIT` $\rightarrow$ `OUT_FOR_DELIVERY` $\rightarrow$ `DELIVERED`.
       - Tự động cập nhật `payment_status = PAID` khi đơn COD được giao thành công (`DELIVERED`).
       - Hỗ trợ chế độ Auto-Timeline Simulator (tự động nhảy trạng thái sau mỗi khoảng thời gian định sẵn để demo/kiểm thử).
-    - **Giao Diện Theo Dõi Đơn Hàng (Order Tracking Timeline UI)**: Hiển thị tiến trình đơn hàng trực quan từng bước cho khách hàng trên Storefront.
-  - [ ] Xây dựng trang tra cứu lịch sử đơn hàng trên Storefront (`/account/orders`).
+    - [x] **Giao Diện Theo Dõi Đơn Hàng (Order Tracking Timeline UI)**: Hiển thị tiến trình đơn hàng trực quan 5 bước cho khách hàng trên Storefront (`/orders/[orderCode]`).
+  - [x] Xây dựng **Hệ Thống Xác Thực & Quản Lý Tài Khoản Khách Hàng (Storefront Auth & Account)**:
+    - [x] Tầng dịch vụ `authService` và `AuthContext` tích hợp API Gateway (:8000) & JWT Auth Service (:50051).
+    - [x] Trang Đăng nhập & Đăng ký tài khoản (`/login`) với tính năng ẩn/hiện mật khẩu, kiểm tra form và tự động quay lại trang trước đó qua tham số `redirect`.
+    - [x] Bảo vệ luồng mua sắm: Bắt buộc đăng nhập khi khách bấm thêm vào giỏ hàng, mua ngay hoặc thanh toán.
+    - [x] Trang Thông tin tài khoản người dùng (`/account/profile` và `/account`).
+    - [x] Menu tài khoản người dùng trên Navbar (Desktop & Mobile Drawer) kèm chức năng đăng xuất an toàn.
+    - [x] Trang tra cứu lịch sử đơn hàng của khách hàng trên Storefront (`/account/orders`).
 
 ---
 
