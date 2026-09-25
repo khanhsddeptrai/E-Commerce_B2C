@@ -16,8 +16,10 @@ import {
   ExternalLink,
   RotateCcw,
   Loader2,
+  Package,
 } from "lucide-react";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 import { CartItem } from "@/types/ecommerce";
 import { orderService } from "@/services/orderService";
 import { paymentService } from "@/services/paymentService";
@@ -34,17 +36,37 @@ interface PendingVnpayOrder {
 export default function CheckoutPage() {
   const router = useRouter();
   const { items, subtotal, discount, shipping, total, clearCart, restoreCart, voucherCode } = useCart();
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
 
   const [paymentMethod, setPaymentMethod] = useState<"vnpay" | "momo" | "card" | "cod">("vnpay");
   const [formData, setFormData] = useState({
-    fullName: "Nguyễn Văn An",
-    phone: "0901234567",
-    email: "an.nguyen@example.com",
-    city: "Hồ Chí Minh",
-    district: "Quận 1",
-    address: "Số 123 Đường Lê Lợi, Phường Bến Nghé",
-    note: "Giao trong giờ hành chính giúp tôi.",
+    fullName: "",
+    phone: "",
+    email: "",
+    city: "",
+    district: "",
+    address: "",
+    note: "",
   });
+
+  // Tự động điền thông tin tài khoản nếu đã đăng nhập
+  useEffect(() => {
+    if (user) {
+      setFormData((prev) => ({
+        ...prev,
+        fullName: prev.fullName || user.fullName || "",
+        email: prev.email || user.email || "",
+        phone: prev.phone || user.phone || "",
+      }));
+    }
+  }, [user]);
+
+  // Yêu cầu đăng nhập trước khi tiến hành thanh toán
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.push("/login?redirect=/checkout");
+    }
+  }, [authLoading, isAuthenticated, router]);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
@@ -241,6 +263,7 @@ export default function CheckoutPage() {
 
     const fullAddress = `${formData.address}, ${formData.district}, ${formData.city}`;
     const payload = {
+      customer_id: user?.id,
       customer_name: formData.fullName,
       customer_phone: formData.phone,
       customer_email: formData.email,
@@ -315,6 +338,15 @@ export default function CheckoutPage() {
     }
     setIsSubmitting(false);
   };
+
+  if (authLoading || !isAuthenticated) {
+    return (
+      <div className="min-h-[50vh] flex flex-col items-center justify-center space-y-3">
+        <Loader2 className="w-8 h-8 animate-spin text-indigo-600" />
+        <p className="text-xs text-slate-500">Đang kiểm tra quyền truy cập thanh toán...</p>
+      </div>
+    );
+  }
 
   if (isRedirecting) {
     return (
@@ -512,12 +544,20 @@ export default function CheckoutPage() {
             Đơn hàng đã được ghi nhận vào hệ thống phân tán và điều phối tới trung tâm hoàn tất đơn gần nhất. Thông tin chi tiết đã được gửi tới email <b>{formData.email}</b>.
           </div>
 
-          <button
-            onClick={() => router.push("/")}
-            className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition-colors shadow-md shadow-indigo-600/20"
-          >
-            Quay Về Trang Chủ
-          </button>
+          <div className="space-y-2 pt-2">
+            <button
+              onClick={() => router.push(`/orders/${orderSuccess.orderId}`)}
+              className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition-all shadow-md shadow-indigo-600/20 flex items-center justify-center gap-2"
+            >
+              <Package className="w-4 h-4" /> Theo Dõi Tiến Trình Đơn Hàng
+            </button>
+            <button
+              onClick={() => router.push("/")}
+              className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl transition-colors"
+            >
+              Quay Về Trang Chủ
+            </button>
+          </div>
         </div>
       ) : items.length === 0 ? (
         /* EMPTY CART REDIRECT OR PENDING ORDER NOTICE */
@@ -562,9 +602,10 @@ export default function CheckoutPage() {
                       type="text"
                       name="fullName"
                       required
+                      placeholder="Ví dụ: Nguyễn Văn An"
                       value={formData.fullName}
                       onChange={handleInputChange}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 placeholder:text-slate-400"
                     />
                   </div>
                   <div>
@@ -573,9 +614,10 @@ export default function CheckoutPage() {
                       type="tel"
                       name="phone"
                       required
+                      placeholder="Ví dụ: 0901234567"
                       value={formData.phone}
                       onChange={handleInputChange}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 placeholder:text-slate-400"
                     />
                   </div>
                 </div>
@@ -586,9 +628,10 @@ export default function CheckoutPage() {
                     type="email"
                     name="email"
                     required
+                    placeholder="Ví dụ: an.nguyen@example.com"
                     value={formData.email}
                     onChange={handleInputChange}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 placeholder:text-slate-400"
                   />
                 </div>
 
@@ -599,9 +642,10 @@ export default function CheckoutPage() {
                       type="text"
                       name="city"
                       required
+                      placeholder="Ví dụ: TP. Hồ Chí Minh"
                       value={formData.city}
                       onChange={handleInputChange}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 placeholder:text-slate-400"
                     />
                   </div>
                   <div>
@@ -610,9 +654,10 @@ export default function CheckoutPage() {
                       type="text"
                       name="district"
                       required
+                      placeholder="Ví dụ: Quận 1"
                       value={formData.district}
                       onChange={handleInputChange}
-                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 placeholder:text-slate-400"
                     />
                   </div>
                 </div>
@@ -623,9 +668,10 @@ export default function CheckoutPage() {
                     type="text"
                     name="address"
                     required
+                    placeholder="Ví dụ: Số 123 Đường Lê Lợi, Phường Bến Nghé"
                     value={formData.address}
                     onChange={handleInputChange}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 placeholder:text-slate-400"
                   />
                 </div>
 
@@ -634,9 +680,10 @@ export default function CheckoutPage() {
                   <textarea
                     name="note"
                     rows={2}
+                    placeholder="Ví dụ: Giao trong giờ hành chính, gọi trước khi giao..."
                     value={formData.note}
                     onChange={handleInputChange}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500"
+                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-indigo-500 placeholder:text-slate-400"
                   />
                 </div>
               </div>

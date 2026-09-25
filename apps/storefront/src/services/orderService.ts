@@ -56,6 +56,31 @@ export const orderService = {
     return null;
   },
 
+  async getOrdersByCustomer(
+    customerId: string,
+    page = 1,
+    limit = 10
+  ): Promise<{ orders: ApiOrderDto[]; total: number }> {
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/orders/customer/${encodeURIComponent(customerId)}?page=${page}&limit=${limit}`,
+        {
+          cache: "no-store",
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          orders: (data.orders || []) as ApiOrderDto[],
+          total: Number(data.total || 0),
+        };
+      }
+    } catch (err: unknown) {
+      console.warn("[orderService.getOrdersByCustomer] Error:", err);
+    }
+    return { orders: [], total: 0 };
+  },
+
   async cancelOrder(orderId: string, reason?: string): Promise<{ success: boolean; message: string }> {
     try {
       const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(orderId)}/cancel`, {

@@ -18,6 +18,7 @@ import {
 import { productService } from "@/services/productService";
 import { Product, ProductVariant } from "@/types/ecommerce";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 import { ProductCard } from "@/components/ProductCard";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 
@@ -25,6 +26,7 @@ export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { addToCart } = useCart();
+  const { isAuthenticated } = useAuth();
 
   const slug = params.slug as string;
 
@@ -128,6 +130,10 @@ export default function ProductDetailPage() {
   };
 
   const handleAddToCart = () => {
+    if (!isAuthenticated) {
+      router.push(`/login?redirect=/products/${slug}`);
+      return;
+    }
     if (activeVariant) {
       addToCart(product, activeVariant, quantity);
       setIsAddedToast(true);
@@ -136,6 +142,10 @@ export default function ProductDetailPage() {
   };
 
   const handleBuyNow = () => {
+    if (!isAuthenticated) {
+      router.push(`/login?redirect=/checkout`);
+      return;
+    }
     if (activeVariant) {
       addToCart(product, activeVariant, quantity);
       router.push("/checkout");

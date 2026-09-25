@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   CreditCard,
   Loader2,
+  Package,
 } from "lucide-react";
 import { paymentService, VerifyPaymentResult } from "@/services/paymentService";
 
@@ -175,8 +176,14 @@ function PaymentResultContent() {
           {isSuccess ? (
             <>
               <Link
-                href="/products"
+                href={`/orders/${result.order_code}`}
                 className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold transition-all shadow-md shadow-indigo-600/25"
+              >
+                <Package className="w-4 h-4" /> Theo dõi tiến trình đơn hàng
+              </Link>
+              <Link
+                href="/products"
+                className="inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold transition-all"
               >
                 <ShoppingBag className="w-4 h-4" /> Tiếp tục mua sắm
               </Link>

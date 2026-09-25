@@ -3,20 +3,34 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ShoppingBag, Search, Menu, X, Cpu, Sparkles, ChevronRight } from "lucide-react";
+import { ShoppingBag, Search, Menu, X, Cpu, Sparkles, ChevronRight, User, LogOut, Package, ChevronDown } from "lucide-react";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 import { productService } from "@/services/productService";
 import { Product } from "@/types/ecommerce";
 
 export function Navbar() {
   const router = useRouter();
   const { totalItems, openCart } = useCart();
+  const { user, isAuthenticated, logout } = useAuth();
   const [isScrolled, setIsScrolled] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Product[]>([]);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const searchRef = useRef<HTMLDivElement>(null);
+  const userMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -195,8 +209,63 @@ export function Navbar() {
             )}
           </div>
 
-          {/* Right Action Icons: Cart */}
+          {/* Right Action Icons: User & Cart */}
           <div className="flex items-center gap-2">
+            {/* User Account Button & Dropdown */}
+            {isAuthenticated && user ? (
+              <div ref={userMenuRef} className="relative hidden sm:block">
+                <button
+                  type="button"
+                  onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+                  className="flex items-center gap-2 p-1.5 pr-3 rounded-full hover:bg-slate-100 text-slate-700 transition-colors border border-slate-200/80"
+                  aria-label="Tài khoản cá nhân"
+                >
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-indigo-600 to-violet-500 text-white flex items-center justify-center text-xs font-bold shadow-sm">
+                    {user.fullName ? user.fullName.charAt(0).toUpperCase() : "U"}
+                  </div>
+                  <span className="text-xs font-semibold text-slate-800 max-w-[100px] truncate">
+                    {user.fullName || user.email.split("@")[0]}
+                  </span>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                </button>
+
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200/80 p-2 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="px-3 py-2 border-b border-slate-100 mb-1">
+                      <p className="text-xs font-bold text-slate-900 truncate">{user.fullName}</p>
+                      <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
+                    </div>
+                    <Link
+                      href="/account/orders"
+                      onClick={() => setIsUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-indigo-600 rounded-xl transition-colors"
+                    >
+                      <Package className="w-4 h-4 text-indigo-500" /> Đơn hàng của tôi
+                    </Link>
+                    <div className="border-t border-slate-100 my-1"></div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        logout();
+                      }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" /> Đăng xuất
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Link
+                href="/login"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900 text-xs font-semibold transition-all"
+              >
+                <User className="w-4 h-4 text-slate-500" />
+                <span>Đăng nhập</span>
+              </Link>
+            )}
+
             <button
               onClick={openCart}
               className="relative p-2.5 rounded-full hover:bg-slate-100 text-slate-700 hover:text-slate-900 transition-colors flex items-center gap-2 group"
@@ -276,6 +345,43 @@ export function Navbar() {
             >
               Desk Setup & Bàn Phím
             </Link>
+
+            {/* Mobile User Section */}
+            <div className="pt-3 border-t border-slate-200/80">
+              {isAuthenticated && user ? (
+                <div className="space-y-2">
+                  <div className="px-3 py-1">
+                    <p className="text-xs font-bold text-slate-900">{user.fullName}</p>
+                    <p className="text-[11px] text-slate-500">{user.email}</p>
+                  </div>
+                  <Link
+                    href="/account/orders"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                  >
+                    <Package className="w-4 h-4" /> Đơn hàng của tôi
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      logout();
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50 rounded-lg"
+                  >
+                    <LogOut className="w-4 h-4" /> Đăng xuất
+                  </button>
+                </div>
+              ) : (
+                <Link
+                  href="/login"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="flex items-center justify-center gap-2 w-full py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-md"
+                >
+                  <User className="w-4 h-4" /> Đăng nhập tài khoản
+                </Link>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -43,7 +43,7 @@ export class OrderController implements OnModuleInit {
     @Body() dto: CreateOrderDto,
     @Headers('x-cart-session-id') guestHeader?: string,
   ) {
-    const customerId = req.user?.userId || '00000000-0000-0000-0000-000000000000';
+    const customerId = req.user?.userId || dto.customer_id || '00000000-0000-0000-0000-000000000000';
 
     const res = await firstValueFrom(
       this.orderServiceClient.createOrder({

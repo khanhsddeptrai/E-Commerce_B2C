@@ -276,10 +276,22 @@ export class OrderService {
   }
 
   async getOrderById(data: GetOrderByIdRequest): Promise<GetOrderByIdResponse> {
-    const order = await this.prisma.order.findUnique({
-      where: { id: data.order_id },
-      include: { items: true },
-    });
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.order_id);
+    let order: OrderWithItems | null = null;
+
+    if (isUuid) {
+      order = await this.prisma.order.findUnique({
+        where: { id: data.order_id },
+        include: { items: true },
+      });
+    }
+
+    if (!order) {
+      order = await this.prisma.order.findUnique({
+        where: { orderCode: data.order_id },
+        include: { items: true },
+      });
+    }
 
     if (!order) {
       throw new RpcException({

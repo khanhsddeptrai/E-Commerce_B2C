@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
 import { Navbar } from "@/components/Navbar";
 import { CartDrawer } from "@/components/CartDrawer";
@@ -30,14 +31,16 @@ export default function RootLayout({
         className="min-h-screen flex flex-col bg-slate-50 text-slate-900 selection:bg-indigo-500 selection:text-white"
         suppressHydrationWarning
       >
-        <CartProvider>
-          <Navbar />
-          <main className="flex-1">{children}</main>
-          <CartDrawer />
-          <Toast />
-          <ScrollToTop />
-          <Footer />
-        </CartProvider>
+        <AuthProvider>
+          <CartProvider>
+            <Navbar />
+            <main className="flex-1">{children}</main>
+            <CartDrawer />
+            <Toast />
+            <ScrollToTop />
+            <Footer />
+          </CartProvider>
+        </AuthProvider>
       </body>
     </html>
   );

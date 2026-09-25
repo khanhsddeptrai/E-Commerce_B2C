@@ -22,6 +22,10 @@ export class OrderItemInputDto {
 
 export class CreateOrderDto {
   @IsString()
+  @IsOptional()
+  customer_id?: string;
+
+  @IsString()
   @IsNotEmpty()
   customer_name!: string;
 

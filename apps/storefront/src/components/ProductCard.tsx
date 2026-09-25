@@ -2,9 +2,11 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Star, ShoppingBag, Check, Zap, Eye } from "lucide-react";
 import { Product } from "@/types/ecommerce";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 import { ImagePreviewModal } from "@/components/ImagePreviewModal";
 
 interface ProductCardProps {
@@ -12,7 +14,9 @@ interface ProductCardProps {
 }
 
 export function ProductCard({ product }: ProductCardProps) {
+  const router = useRouter();
   const { addToCart } = useCart();
+  const { isAuthenticated } = useAuth();
   const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
   const [isAdded, setIsAdded] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
@@ -40,6 +44,10 @@ export function ProductCard({ product }: ProductCardProps) {
   const handleQuickAdd = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (!isAuthenticated) {
+      router.push(`/login?redirect=/products/${product.slug}`);
+      return;
+    }
     if (activeVariant) {
       addToCart(product, activeVariant, 1);
       setIsAdded(true);

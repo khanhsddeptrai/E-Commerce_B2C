@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { X, Trash2, Plus, Minus, ShoppingBag, ArrowRight, ShieldCheck, Tag } from "lucide-react";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 
 export function CartDrawer() {
   const router = useRouter();
+  const { isAuthenticated } = useAuth();
   const {
     items,
     isOpen,
@@ -40,6 +42,10 @@ export function CartDrawer() {
 
   const handleProceedToCheckout = () => {
     closeCart();
+    if (!isAuthenticated) {
+      router.push("/login?redirect=/checkout");
+      return;
+    }
     router.push("/checkout");
   };
 

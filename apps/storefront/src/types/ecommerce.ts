@@ -213,6 +213,7 @@ export interface ApiOrderDto {
 }
 
 export interface CreateOrderPayload {
+  customer_id?: string;
   customer_name: string;
   customer_phone: string;
   customer_email: string;
