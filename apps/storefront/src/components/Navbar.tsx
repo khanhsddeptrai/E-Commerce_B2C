@@ -236,6 +236,13 @@ export function Navbar() {
                       <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
                     </div>
                     <Link
+                      href="/account/profile"
+                      onClick={() => setIsUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-indigo-600 rounded-xl transition-colors"
+                    >
+                      <User className="w-4 h-4 text-indigo-500" /> Thông tin tài khoản
+                    </Link>
+                    <Link
                       href="/account/orders"
                       onClick={() => setIsUserMenuOpen(false)}
                       className="flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-indigo-600 rounded-xl transition-colors"
@@ -355,11 +362,18 @@ export function Navbar() {
                     <p className="text-[11px] text-slate-500">{user.email}</p>
                   </div>
                   <Link
+                    href="/account/profile"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-lg"
+                  >
+                    <User className="w-4 h-4 text-indigo-600" /> Thông tin tài khoản
+                  </Link>
+                  <Link
                     href="/account/orders"
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-indigo-600 hover:bg-indigo-50 rounded-lg"
+                    className="flex items-center gap-2 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-lg"
                   >
-                    <Package className="w-4 h-4" /> Đơn hàng của tôi
+                    <Package className="w-4 h-4 text-indigo-600" /> Đơn hàng của tôi
                   </Link>
                   <button
                     type="button"
