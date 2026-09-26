@@ -31,14 +31,19 @@ export interface LoginPayload {
   device_info?: string;
 }
 
-const TOKEN_KEY = 'novatech_access_token';
 const USER_KEY = 'novatech_user_profile';
 
 export const authService = {
-  // Lấy access token từ localStorage
+  // Kiểm tra trạng thái đăng nhập (dựa trên thông tin user cache)
+  isAuthenticated(): boolean {
+    if (typeof window === 'undefined') return false;
+    return Boolean(localStorage.getItem(USER_KEY));
+  },
+
+  // Giữ lại để tương thích ngược nếu có component gọi getToken
   getToken(): string | null {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem(TOKEN_KEY);
+    return this.isAuthenticated() ? 'cookie_authenticated' : null;
   },
 
   // Lấy thông tin user đã lưu
@@ -53,21 +58,24 @@ export const authService = {
     }
   },
 
-  // Lưu thông tin đăng nhập
-  saveAuth(data: { accessToken: string; user: UserProfile }): void {
+  // Lưu thông tin đăng nhập (Token được trình duyệt tự lưu vào HttpOnly Cookie)
+  saveAuth(data: { user: UserProfile }): void {
     if (typeof window === 'undefined') return;
-    localStorage.setItem(TOKEN_KEY, data.accessToken);
     localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-    // Lưu cookie nhẹ để middleware nếu cần SSR
-    document.cookie = `novatech_auth_token=${data.accessToken}; path=/; max-age=604800; SameSite=Lax`;
   },
 
-  // Xóa thông tin đăng nhập
-  clearAuth(): void {
+  // Đăng xuất an toàn: Xóa cookie từ server và xóa cache user
+  async clearAuth(): Promise<void> {
     if (typeof window === 'undefined') return;
-    localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
-    document.cookie = 'novatech_auth_token=; path=/; max-age=0; SameSite=Lax';
+    try {
+      await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+    } catch (err: unknown) {
+      console.warn('[authService.clearAuth] Failed to call logout endpoint:', err);
+    }
   },
 
   // Đăng ký tài khoản
@@ -75,6 +83,7 @@ export const authService = {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/auth/register`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -100,12 +109,12 @@ export const authService = {
 
       const result: AuthResponseData = {
         user: formattedUser,
-        accessToken: body.access_token || body.accessToken,
-        refreshToken: body.refresh_token || body.refreshToken,
+        accessToken: body.access_token || body.accessToken || '',
+        refreshToken: body.refresh_token || body.refreshToken || '',
         expiresIn: body.expires_in || body.expiresIn || 604800,
       };
 
-      this.saveAuth({ accessToken: result.accessToken, user: formattedUser });
+      this.saveAuth({ user: formattedUser });
       return { success: true, data: result };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không thể kết nối đến máy chủ xác thực';
@@ -118,6 +127,7 @@ export const authService = {
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/auth/login`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -143,12 +153,12 @@ export const authService = {
 
       const result: AuthResponseData = {
         user: formattedUser,
-        accessToken: body.access_token || body.accessToken,
-        refreshToken: body.refresh_token || body.refreshToken,
+        accessToken: body.access_token || body.accessToken || '',
+        refreshToken: body.refresh_token || body.refreshToken || '',
         expiresIn: body.expires_in || body.expiresIn || 604800,
       };
 
-      this.saveAuth({ accessToken: result.accessToken, user: formattedUser });
+      this.saveAuth({ user: formattedUser });
       return { success: true, data: result };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Không thể kết nối đến máy chủ xác thực';
@@ -156,21 +166,18 @@ export const authService = {
     }
   },
 
-  // Lấy thông tin tài khoản hiện tại từ Token
+  // Lấy thông tin tài khoản hiện tại từ HttpOnly Cookie phiên làm việc
   async getProfile(): Promise<UserProfile | null> {
-    const token = this.getToken();
-    if (!token) return null;
-
     try {
       const res = await fetch(`${API_BASE_URL}/api/v1/auth/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: 'include',
       });
 
       if (!res.ok) {
         if (res.status === 401) {
-          this.clearAuth();
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem(USER_KEY);
+          }
         }
         return null;
       }
@@ -188,7 +195,6 @@ export const authService = {
         createdAt: u.created_at || u.createdAt,
       };
 
-      // Cập nhật lại localStorage với thông tin mới nhất
       if (typeof window !== 'undefined') {
         localStorage.setItem(USER_KEY, JSON.stringify(formattedUser));
       }

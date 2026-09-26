@@ -3,6 +3,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AUTH_PACKAGE_NAME, AUTH_PROTO_PATH } from '@repo/proto';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RateLimitGuard } from '../common/guards/rate-limit.guard';
 
 @Module({
   imports: [
@@ -22,7 +23,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
     ]),
   ],
   controllers: [AuthController],
-  providers: [JwtAuthGuard],
-  exports: [JwtAuthGuard, ClientsModule],
+  providers: [JwtAuthGuard, RateLimitGuard],
+  exports: [JwtAuthGuard, RateLimitGuard, ClientsModule],
 })
 export class AuthModule {}

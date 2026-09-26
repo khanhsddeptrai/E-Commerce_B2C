@@ -18,19 +18,26 @@ dotenv.config();
 
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { GrpcToHttpExceptionFilter } from './common/filters/grpc-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Cookie parser middleware cho HttpOnly authentication cookies
+  app.use(cookieParser());
+
   // Enable CORS for Storefront and Admin clients
+  const isProduction = process.env.NODE_ENV === 'production';
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    ...(isProduction ? [] : [/^http:\/\/localhost:[0-9]+$/]),
+  ];
+
   app.enableCors({
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      /^http:\/\/localhost:[0-9]+$/,
-    ],
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   });

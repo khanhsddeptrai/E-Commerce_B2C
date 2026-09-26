@@ -82,7 +82,7 @@ export const productService = {
           };
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[productService.getProducts] Error fetching products:", err);
     }
 
@@ -103,7 +103,7 @@ export const productService = {
           return mapApiProductToProduct(data);
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[productService.getProductBySlug] Error fetching product:", err);
     }
     return null;
@@ -120,7 +120,7 @@ export const productService = {
           return data.products.map(mapApiProductToProduct);
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[productService.getFeaturedProducts] Error:", err);
     }
     return [];
@@ -137,7 +137,7 @@ export const productService = {
           return data.products.map(mapApiProductToProduct);
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[productService.getFlashSaleProducts] Error:", err);
     }
     return [];
@@ -154,7 +154,7 @@ export const productService = {
           return data.map(mapApiCategoryToCategory);
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[productService.getCategories] Error:", err);
     }
     return [];

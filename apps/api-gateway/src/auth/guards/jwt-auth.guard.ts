@@ -22,13 +22,18 @@ export class JwtAuthGuard implements CanActivate, OnModuleInit {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const authHeader = request.headers['authorization'];
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Không tìm thấy Bearer Token');
+    // Ưu tiên đọc từ HttpOnly Cookie, dự phòng đọc từ Authorization header
+    let token = request.cookies?.novatech_auth_token;
+    if (!token) {
+      const authHeader = request.headers['authorization'];
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.split(' ')[1];
+      }
     }
 
-    const token = authHeader.split(' ')[1];
+    if (!token) {
+      throw new UnauthorizedException('Bạn chưa đăng nhập hoặc phiên làm việc đã hết hạn');
+    }
 
     try {
       const res = await firstValueFrom(

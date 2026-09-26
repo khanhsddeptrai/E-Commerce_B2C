@@ -21,32 +21,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [token, setToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Khởi tạo trạng thái phiên từ localStorage
+  // Khởi tạo trạng thái phiên từ HttpOnly Cookie & cache user
   const initAuth = useCallback(async () => {
     setIsLoading(true);
-    const savedToken = authService.getToken();
     const savedUser = authService.getSavedUser();
 
-    if (savedToken && savedUser) {
-      setToken(savedToken);
+    if (savedUser) {
       setUser(savedUser);
-      // Xác thực ngầm với server để làm mới dữ liệu
-      try {
-        const freshUser = await authService.getProfile();
-        if (freshUser) {
-          setUser(freshUser);
-        } else {
-          // Token không còn hợp lệ
-          setToken(null);
-          setUser(null);
-        }
-      } catch {
-        // Giữ thông tin đã lưu nếu mất mạng tạm thời
-      }
-    } else {
-      setToken(null);
-      setUser(null);
+      setToken('authenticated');
     }
+
+    try {
+      const freshUser = await authService.getProfile();
+      if (freshUser) {
+        setUser(freshUser);
+        setToken('authenticated');
+      } else {
+        // Phiên làm việc không hợp lệ hoặc đã hết hạn
+        setUser(null);
+        setToken(null);
+      }
+    } catch {
+      // Giữ thông tin đã lưu nếu mất mạng tạm thời
+    }
+
     setIsLoading(false);
   }, []);
 
@@ -75,7 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
-    authService.clearAuth();
+    void authService.clearAuth();
     setUser(null);
     setToken(null);
   };

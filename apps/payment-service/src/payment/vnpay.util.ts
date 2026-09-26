@@ -46,7 +46,11 @@ export function verifyVnpaySignature(
   const hmac = crypto.createHmac('sha512', secretKey);
   const signed = hmac.update(Buffer.from(signData, 'utf-8')).digest('hex');
 
-  return String(secureHash).toLowerCase() === signed.toLowerCase();
+  const hashBuf = Buffer.from(String(secureHash).toLowerCase(), 'utf-8');
+  const signBuf = Buffer.from(signed.toLowerCase(), 'utf-8');
+  if (hashBuf.length !== signBuf.length) return false;
+
+  return crypto.timingSafeEqual(hashBuf, signBuf);
 }
 
 export function formatVnpayDate(date: Date = new Date()): string {

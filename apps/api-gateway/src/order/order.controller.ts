@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   Headers,
   Inject,
@@ -9,6 +10,7 @@ import {
   Post,
   Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
 import { ClientGrpc } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
@@ -16,12 +18,20 @@ import { Request } from 'express';
 import { OrderServiceClient } from '@repo/proto';
 import { CartService } from '../cart/cart.service';
 import { CreateOrderDto, CancelOrderDto } from './dto/create-order.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
+interface AuthenticatedUser {
+  userId: string;
+  email: string;
+  role: string;
+}
+
+interface RequestWithUser extends Request {
+  user: AuthenticatedUser;
+}
 
 interface RequestWithOptionalUser extends Request {
-  user?: {
-    userId: string;
-    email: string;
-  };
+  user?: AuthenticatedUser;
 }
 
 @Controller('api/v1/orders')
@@ -38,19 +48,21 @@ export class OrderController implements OnModuleInit {
   }
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   async createOrder(
-    @Req() req: RequestWithOptionalUser,
+    @Req() req: RequestWithUser,
     @Body() dto: CreateOrderDto,
     @Headers('x-cart-session-id') guestHeader?: string,
   ) {
-    const customerId = req.user?.userId || dto.customer_id || '00000000-0000-0000-0000-000000000000';
+    // Không tin tưởng customer_id từ client body, ép sử dụng userId từ Token xác thực
+    const customerId = req.user.userId;
 
     const res = await firstValueFrom(
       this.orderServiceClient.createOrder({
         customer_id: customerId,
         customer_name: dto.customer_name,
         customer_phone: dto.customer_phone,
-        customer_email: dto.customer_email,
+        customer_email: dto.customer_email || req.user.email,
         shipping_address_json: dto.shipping_address_json,
         payment_method: dto.payment_method || 'COD',
         voucher_code: dto.voucher_code,
@@ -61,7 +73,7 @@ export class OrderController implements OnModuleInit {
 
     // Khi tạo đơn thành công, tự động làm sạch giỏ hàng trên Redis
     if (res.success) {
-      const cartKey = req.user?.userId ? `user_${req.user.userId}` : (guestHeader ? `guest_${guestHeader.trim()}` : 'guest_default_session');
+      const cartKey = `user_${req.user.userId}`;
       try {
         await this.cartService.clearCart(cartKey);
       } catch (err: unknown) {
@@ -87,11 +99,18 @@ export class OrderController implements OnModuleInit {
   }
 
   @Get('customer/:customerId')
+  @UseGuards(JwtAuthGuard)
   async getOrdersByCustomer(
     @Param('customerId') customerId: string,
+    @Req() req: RequestWithUser,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
   ) {
+    // Chống BOLA/IDOR: Chỉ chính chủ hoặc ADMIN mới được xem lịch sử đơn hàng
+    if (req.user.userId !== customerId && req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Bạn không có quyền truy cập lịch sử đơn hàng của người khác');
+    }
+
     const res = await firstValueFrom(
       this.orderServiceClient.getOrdersByCustomer({
         customer_id: customerId,
@@ -103,12 +122,13 @@ export class OrderController implements OnModuleInit {
   }
 
   @Post(':id/cancel')
+  @UseGuards(JwtAuthGuard)
   async cancelOrder(
     @Param('id') id: string,
-    @Req() req: RequestWithOptionalUser,
+    @Req() req: RequestWithUser,
     @Body() dto: CancelOrderDto,
   ) {
-    const customerId = req.user?.userId || '00000000-0000-0000-0000-000000000000';
+    const customerId = req.user.userId;
     const res = await firstValueFrom(
       this.orderServiceClient.cancelOrder({
         order_id: id,

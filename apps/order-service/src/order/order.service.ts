@@ -112,11 +112,8 @@ export class OrderService {
 
       const stockKey = `stock:${item.sku_id}`;
 
-      // Nếu key chưa có trên Redis, đồng bộ số lượng tồn từ DB sang Redis
-      const exists = await this.redis.exists(stockKey);
-      if (!exists) {
-        await this.redis.set(stockKey, sku.stockQuantity);
-      }
+      // Đồng bộ số lượng tồn từ DB sang Redis một cách nguyên tử (chỉ set nếu key chưa tồn tại)
+      await this.redis.set(stockKey, sku.stockQuantity, 'NX');
 
       // Chạy Lua Script nguyên tử: Check và Decr
       const result = await this.redis.eval(

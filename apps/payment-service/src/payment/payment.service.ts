@@ -136,34 +136,77 @@ export class PaymentService implements OnModuleInit {
 
     const isSuccess = responseCode === '00';
 
-    // Cập nhật bản ghi Payment
+    // 1. Kiểm tra bản ghi Payment
     const payment = await this.prisma.payment.findFirst({
       where: { orderCode },
       orderBy: { createdAt: 'desc' },
     });
 
-    if (payment) {
-      await this.prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: isSuccess ? PaymentPrisma.PaymentStatus.PAID : PaymentPrisma.PaymentStatus.FAILED,
-          transactionNo,
-          bankCode,
-          bankTranNo,
-          cardType,
-          vnpResponseCode: responseCode,
-          payDate: parseVnpayDate(payDateStr),
-        },
-      });
-
-      await this.prisma.paymentLog.create({
-        data: {
-          paymentId: payment.id,
-          action: isSuccess ? 'PAYMENT_RETURN_SUCCESS' : 'PAYMENT_RETURN_FAILED',
-          rawPayload: queryParams,
-        },
-      });
+    if (!payment) {
+      this.logger.error(`[verifyPaymentReturn] Không tìm thấy bản ghi thanh toán cho đơn ${orderCode}`);
+      return {
+        is_valid: false,
+        is_success: false,
+        order_code: orderCode,
+        amount: rawAmount,
+        transaction_no: transactionNo,
+        bank_code: bankCode,
+        message: 'Không tìm thấy thông tin thanh toán cho đơn hàng này',
+        response_code: '01',
+      };
     }
+
+    // 2. Idempotency Check: Chống Replay Attack / Callback trùng lặp
+    if (payment.status === PaymentPrisma.PaymentStatus.PAID) {
+      this.logger.log(`[verifyPaymentReturn] Giao dịch đơn hàng ${orderCode} đã được thanh toán thành công trước đó (Idempotent hit)`);
+      return {
+        is_valid: true,
+        is_success: true,
+        order_code: orderCode,
+        amount: Number(payment.amount),
+        transaction_no: payment.transactionNo || transactionNo,
+        bank_code: payment.bankCode || bankCode,
+        message: 'Giao dịch đơn hàng đã được ghi nhận thành công trước đó',
+        response_code: '00',
+      };
+    }
+
+    // 3. Amount Verification: Đối soát số tiền thực nhận với số tiền trong hóa đơn
+    if (Math.abs(rawAmount - Number(payment.amount)) > 0.01) {
+      this.logger.error(`[verifyPaymentReturn] Sai lệch số tiền cho đơn ${orderCode}! DB: ${payment.amount}, VNPAY: ${rawAmount}`);
+      return {
+        is_valid: false,
+        is_success: false,
+        order_code: orderCode,
+        amount: rawAmount,
+        transaction_no: transactionNo,
+        bank_code: bankCode,
+        message: 'Số tiền thanh toán thực nhận không khớp với giá trị đơn hàng',
+        response_code: '04',
+      };
+    }
+
+    // 4. Cập nhật bản ghi Payment
+    await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        status: isSuccess ? PaymentPrisma.PaymentStatus.PAID : PaymentPrisma.PaymentStatus.FAILED,
+        transactionNo,
+        bankCode,
+        bankTranNo,
+        cardType,
+        vnpResponseCode: responseCode,
+        payDate: parseVnpayDate(payDateStr),
+      },
+    });
+
+    await this.prisma.paymentLog.create({
+      data: {
+        paymentId: payment.id,
+        action: isSuccess ? 'PAYMENT_RETURN_SUCCESS' : 'PAYMENT_RETURN_FAILED',
+        rawPayload: queryParams,
+      },
+    });
 
     // SAGA Orchestration: Gọi sang OrderService
     if (isSuccess) {

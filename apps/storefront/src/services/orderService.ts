@@ -13,6 +13,7 @@ export const orderService = {
       const sessionId = getCartSessionId();
       const res = await fetch(`${API_BASE_URL}/orders`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           "x-cart-session-id": sessionId,
@@ -46,6 +47,7 @@ export const orderService = {
     try {
       const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(orderId)}`, {
         cache: "no-store",
+        credentials: "include",
       });
       if (res.ok) {
         return (await res.json()) as ApiOrderDto;
@@ -66,6 +68,7 @@ export const orderService = {
         `${API_BASE_URL}/orders/customer/${encodeURIComponent(customerId)}?page=${page}&limit=${limit}`,
         {
           cache: "no-store",
+          credentials: "include",
         }
       );
       if (res.ok) {
@@ -85,6 +88,7 @@ export const orderService = {
     try {
       const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(orderId)}/cancel`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
