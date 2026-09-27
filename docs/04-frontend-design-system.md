@@ -33,7 +33,7 @@ apps/
 ### 2.2. Quy Chuẩn Kiểu Chữ & Nội Dung (Typography & Copywriting)
 * **Font chữ duy nhất**: **Inter** (Google Fonts) — tối ưu hóa khả năng đọc trên màn hình kỹ thuật số.
 * **Quy chuẩn văn bản**:
-  * Tiêu đề (Headings): Luôn dùng `tracking-tight`, viết hoa chữ cái đầu câu tự nhiên, **tránh lạm dụng ALL-CAPS** cho các đoạn dài.
+  * Tiêu đề (Headings): Luôn dùng `tracking-tight`, viết hoa chữ cái đầu câu tự nhiên, **tránh lạm dụng ALL-CAPS** cho các đoạn dài. **Chỉ ghi nội dung tiêu đề là đủ**, tuyệt đối không gắn icon trang trí bên trái, không thêm các câu mô tả phụ/subtext rườm rà phía dưới, và không bọc tiêu đề vào các khung Card/Box riêng biệt.
   * Thông số kỹ thuật: Hiển thị nổi bật, rõ ràng bằng phông có độ đậm cao (`font-bold` / `font-semibold`), đi kèm đơn vị rõ ràng (ví dụ: `40mm`, `65 Giờ`, `96kHz / 24-bit`, `140W`).
   * Định dạng tiền tệ: Luôn dùng chuẩn định dạng VNĐ với dấu chấm phân tách hàng nghìn và ký hiệu tiền tệ phía sau (`3.490.000 ₫`). Giá gốc gạch ngang màu xám nhạt (`line-through text-slate-400`).
 * **Văn phong giao diện (Copywriting)**: Dứt khoát, trực diện, dùng động từ hành động ("Thêm Vào Giỏ Hàng", "Mua Ngay Giao 2H", "Áp Dụng Voucher") thay vì các từ thụ động như "Gửi" hay "OK".
@@ -50,6 +50,7 @@ apps/
 * **Phản hồi tức thời (Tactile Feedback)**:
   * Nút bấm và thẻ sản phẩm khi di chuột (Hover): Phóng to nhẹ (`scale-[1.02]` đến `scale-105`), làm sáng màu viền.
   * Khi bấm (Active): Thu nhỏ nhẹ (`active:scale-[0.98]` hoặc `active:scale-95`) tạo cảm giác nút cơ học chân thực.
+  * Con trỏ chuột: Mọi nút bấm (`button`), tab, checkbox và phần tử tương tác phải luôn có `cursor: pointer`.
 * **Luôn xử lý đủ 4 trạng thái cốt lõi của giao diện (The 4 UI States)**:
   1. **Loading State**: Sử dụng hiệu ứng khung xương (Skeleton pulse) mô phỏng chính xác layout thay vì chỉ hiện spinner đơn điệu.
   2. **Success / Populated State**: Giao diện khi có đầy đủ dữ liệu mượt mà.
@@ -59,6 +60,8 @@ apps/
 ### 2.5. Những Điều Tuyệt Đối Tránh (Anti-Patterns / Không làm)
 * ❌ Không dùng các dải màu gradient trang trí lòe loẹt, vô nghĩa.
 * ❌ Không cắt nhỏ nội dung thành những khối card giống hệt nhau với cùng một kiểu đổ bóng mờ nhạt xám xịt ("SaaS card kit").
+* ❌ Không thêm icon trang trí bên trái tiêu đề trang/khối và không viết các dòng mô tả phụ rườm rà dưới tiêu đề.
+* ❌ Không bọc tiêu đề trang trong các khung Card/Box riêng biệt gây chật chội và thừa thãi không gian.
 * ❌ Không bao giờ hardcode dữ liệu tĩnh trực tiếp trong component JSX; toàn bộ dữ liệu phải đi qua tầng Data Service ([productService.ts](file:///d:/MyProject/E-Commerce_B2C/apps/storefront/src/services/productService.ts)).
 
 
