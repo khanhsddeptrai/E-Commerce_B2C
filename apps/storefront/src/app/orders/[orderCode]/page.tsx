@@ -26,6 +26,7 @@ import {
   Copy,
   Check,
 } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
 import { orderService } from '@/services/orderService';
 import { ApiOrderDto } from '@/types/ecommerce';
 
@@ -38,6 +39,7 @@ interface PageProps {
 export default function OrderDetailsPage({ params }: PageProps) {
   const router = useRouter();
   const { orderCode } = use(params);
+  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
 
   const [order, setOrder] = useState<ApiOrderDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,14 +47,32 @@ export default function OrderDetailsPage({ params }: PageProps) {
   const [isCancelling, setIsCancelling] = useState(false);
   const [copiedTracking, setCopiedTracking] = useState(false);
 
+  // Tự động chuyển hướng ngay về trang chủ khi chưa đăng nhập hoặc vừa bấm Đăng xuất
   useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      router.replace('/');
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    if (!isAuthenticated) {
+      setIsLoading(false);
+      return;
+    }
     if (!orderCode) return;
+
     setIsLoading(true);
     orderService
       .getOrderById(orderCode)
       .then((data) => {
         if (data) {
-          setOrder(data);
+          // Chống BOLA/IDOR phía client: Chỉ cho phép chính chủ hoặc ADMIN xem
+          if (user && data.customer_id && data.customer_id !== user.id && user.role !== 'ADMIN') {
+            setErrorMessage('Bạn không có quyền truy cập thông tin đơn hàng này');
+          } else {
+            setOrder(data);
+          }
         } else {
           setErrorMessage('Không tìm thấy đơn hàng với mã: ' + orderCode);
         }
@@ -64,7 +84,7 @@ export default function OrderDetailsPage({ params }: PageProps) {
       .finally(() => {
         setIsLoading(false);
       });
-  }, [orderCode]);
+  }, [orderCode, authLoading, isAuthenticated, user]);
 
   const formatPrice = (p: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(p);
@@ -118,6 +138,17 @@ export default function OrderDetailsPage({ params }: PageProps) {
     if (orderStatus === 'CONFIRMED' || paymentStatus === 'PAID') return 2;
     return 1; // PENDING
   };
+
+  if (authLoading || (!isAuthenticated && !errorMessage)) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4">
+        <div className="w-16 h-16 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600 animate-spin">
+          <Loader2 className="w-8 h-8" />
+        </div>
+        <h2 className="text-base font-bold text-slate-800">Đang kiểm tra quyền truy cập...</h2>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

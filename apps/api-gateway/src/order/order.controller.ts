@@ -111,16 +111,24 @@ export class OrderController implements OnModuleInit {
   }
 
   @Get(':id')
+  @UseGuards(JwtAuthGuard)
   async getOrderById(
     @Param('id') id: string,
-    @Req() req: RequestWithOptionalUser,
+    @Req() req: RequestWithUser,
   ) {
     const res = await firstValueFrom(
       this.orderServiceClient.getOrderById({
         order_id: id,
-        customer_id: req.user?.userId,
+        customer_id: req.user.userId,
       }),
     );
+    if (!res.order) {
+      return null;
+    }
+    // Chống BOLA/IDOR: Chỉ chính chủ đơn hàng hoặc ADMIN mới được xem chi tiết đơn hàng
+    if (res.order.customer_id && res.order.customer_id !== req.user.userId && req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Bạn không có quyền truy cập thông tin đơn hàng của người khác');
+    }
     return res.order;
   }
 

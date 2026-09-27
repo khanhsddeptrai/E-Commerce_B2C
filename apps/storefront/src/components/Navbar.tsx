@@ -264,6 +264,7 @@ export function Navbar() {
                       onClick={() => {
                         setIsUserMenuOpen(false);
                         logout();
+                        router.push('/');
                       }}
                       className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 rounded-xl transition-colors"
                     >
@@ -398,6 +399,7 @@ export function Navbar() {
                     onClick={() => {
                       setIsMobileMenuOpen(false);
                       logout();
+                      router.push('/');
                     }}
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm font-semibold text-rose-600 hover:bg-rose-50 rounded-lg"
                   >
