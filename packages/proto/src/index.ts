@@ -229,6 +229,16 @@ export interface OrderItemDto {
   thumbnail_url?: string;
 }
 
+export interface OrderStatusHistoryDto {
+  id: string;
+  from_status: string;
+  to_status: string;
+  note?: string;
+  location?: string;
+  changed_by: string;
+  created_at: string;
+}
+
 export interface OrderDto {
   id: string;
   order_code: string;
@@ -249,6 +259,12 @@ export interface OrderDto {
   note?: string;
   items: OrderItemDto[];
   created_at: string;
+  tracking_code?: string;
+  carrier_name?: string;
+  shipping_method?: string;
+  shipped_at?: string;
+  delivered_at?: string;
+  status_history?: OrderStatusHistoryDto[];
 }
 
 export interface CreateOrderResponse {
@@ -288,6 +304,22 @@ export interface CancelOrderResponse {
   message: string;
 }
 
+export interface UpdateDeliveryStatusRequest {
+  order_id: string;
+  new_status: string;
+  location?: string;
+  note?: string;
+  carrier_name?: string;
+  tracking_code?: string;
+  changed_by: string;
+}
+
+export interface UpdateDeliveryStatusResponse {
+  success: boolean;
+  message: string;
+  order?: OrderDto;
+}
+
 export interface OrderServiceClient {
   createOrder(request: CreateOrderRequest): Observable<CreateOrderResponse>;
   getOrderById(request: GetOrderByIdRequest): Observable<GetOrderByIdResponse>;
@@ -295,6 +327,7 @@ export interface OrderServiceClient {
   cancelOrder(request: CancelOrderRequest): Observable<CancelOrderResponse>;
   processPaymentSuccess(request: ProcessPaymentSuccessRequest): Observable<ProcessPaymentSuccessResponse>;
   processPaymentFailed(request: ProcessPaymentFailedRequest): Observable<ProcessPaymentFailedResponse>;
+  updateDeliveryStatus(request: UpdateDeliveryStatusRequest): Observable<UpdateDeliveryStatusResponse>;
 }
 
 export interface ProcessPaymentSuccessRequest {

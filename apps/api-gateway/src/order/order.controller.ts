@@ -7,6 +7,7 @@ import {
   Inject,
   OnModuleInit,
   Param,
+  Patch,
   Post,
   Query,
   Req,
@@ -17,7 +18,12 @@ import { firstValueFrom } from 'rxjs';
 import { Request } from 'express';
 import { OrderServiceClient } from '@repo/proto';
 import { CartService } from '../cart/cart.service';
-import { CreateOrderDto, CancelOrderDto } from './dto/create-order.dto';
+import {
+  CreateOrderDto,
+  CancelOrderDto,
+  UpdateDeliveryStatusDto,
+  CarrierWebhookDto,
+} from './dto/create-order.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 interface AuthenticatedUser {
@@ -84,6 +90,26 @@ export class OrderController implements OnModuleInit {
     return res;
   }
 
+  @Get('admin/all')
+  @UseGuards(JwtAuthGuard)
+  async getAllOrdersForAdmin(
+    @Req() req: RequestWithUser,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ có quản trị viên (ADMIN) mới có quyền truy cập');
+    }
+    const res = await firstValueFrom(
+      this.orderServiceClient.getOrdersByCustomer({
+        customer_id: 'ALL',
+        page: page ? Number(page) : 1,
+        limit: limit ? Number(limit) : 20,
+      }),
+    );
+    return res;
+  }
+
   @Get(':id')
   async getOrderById(
     @Param('id') id: string,
@@ -138,4 +164,55 @@ export class OrderController implements OnModuleInit {
     );
     return res;
   }
+
+  @Patch(':id/delivery-status')
+  @UseGuards(JwtAuthGuard)
+  async updateDeliveryStatus(
+    @Req() req: RequestWithUser,
+    @Param('id') id: string,
+    @Body() dto: UpdateDeliveryStatusDto,
+  ) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ có quản trị viên (ADMIN) mới có quyền thay đổi trạng thái vận chuyển');
+    }
+    const res = await firstValueFrom(
+      this.orderServiceClient.updateDeliveryStatus({
+        order_id: id,
+        new_status: dto.new_status,
+        location: dto.location,
+        note: dto.note,
+        carrier_name: dto.carrier_name,
+        tracking_code: dto.tracking_code,
+        changed_by: `ADMIN_${req.user.email}`,
+      }),
+    );
+    return res;
+  }
+
+  @Post('webhook/carrier')
+  async handleCarrierWebhook(@Body() dto: CarrierWebhookDto) {
+    const statusMap: Record<string, string> = {
+      PICKED_UP: 'SHIPPING',
+      IN_TRANSIT: 'SHIPPING',
+      DELIVERED: 'DELIVERED',
+      FAILED: 'CANCELLED',
+      RETURNED: 'CANCELLED',
+    };
+
+    const targetStatus = statusMap[dto.status] || dto.status;
+
+    const res = await firstValueFrom(
+      this.orderServiceClient.updateDeliveryStatus({
+        order_id: dto.order_code,
+        new_status: targetStatus,
+        location: dto.location,
+        note: dto.note || `Webhook đối tác vận chuyển ${dto.carrier_name || 'Vận chuyển'} cập nhật: ${dto.status}`,
+        carrier_name: dto.carrier_name,
+        tracking_code: dto.tracking_code,
+        changed_by: `CARRIER_WEBHOOK_${dto.carrier_name || 'PARTNER'}`,
+      }),
+    );
+    return res;
+  }
 }
+

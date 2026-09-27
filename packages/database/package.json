@@ -16,7 +16,8 @@
     "db:order:generate": "prisma generate --schema=prisma/schema-order.prisma",
     "db:order:migrate": "prisma migrate dev --schema=prisma/schema-order.prisma",
     "db:payment:generate": "prisma generate --schema=prisma/schema-payment.prisma",
-    "db:payment:migrate": "prisma migrate dev --schema=prisma/schema-payment.prisma"
+    "db:payment:migrate": "prisma migrate dev --schema=prisma/schema-payment.prisma",
+    "db:auth:seed-admin": "node prisma/seed-admin.js"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1"

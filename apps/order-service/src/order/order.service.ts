@@ -17,6 +17,8 @@ import {
   ProcessPaymentSuccessResponse,
   ProcessPaymentFailedRequest,
   ProcessPaymentFailedResponse,
+  UpdateDeliveryStatusRequest,
+  UpdateDeliveryStatusResponse,
   OrderDto,
 } from '@repo/proto';
 
@@ -36,7 +38,9 @@ type OrderWithItems = OrderPrisma.Prisma.OrderGetPayload<{
   include: {
     items: true;
   };
-}>;
+}> & {
+  statusHistory?: OrderPrisma.Prisma.OrderStatusHistoryGetPayload<object>[];
+};
 
 @Injectable()
 export class OrderService {
@@ -217,7 +221,9 @@ export class OrderService {
           paymentStatus: initialPaymentStatus,
           orderStatus: initialOrderStatus,
           voucherCode: data.voucher_code || undefined,
-          note: data.note || undefined,
+          trackingCode: `GHN${Date.now().toString().slice(-8)}${Math.floor(1000 + Math.random() * 9000)}`,
+          carrierName: 'Giao Hàng Nhanh (GHN)',
+          shippingMethod: 'STANDARD',
           items: {
             create: orderItemsData,
           },
@@ -225,13 +231,15 @@ export class OrderService {
             create: {
               fromStatus: 'NONE',
               toStatus: initialOrderStatus,
-              note: initialNote,
+              note: data.note || initialNote,
+              location: 'Kho tổng Novatech Logistics',
               changedBy: data.customer_id || 'CUSTOMER',
             },
           },
         },
         include: {
           items: true,
+          statusHistory: true,
         },
       });
 
@@ -279,14 +287,14 @@ export class OrderService {
     if (isUuid) {
       order = await this.prisma.order.findUnique({
         where: { id: data.order_id },
-        include: { items: true },
+        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
       });
     }
 
     if (!order) {
       order = await this.prisma.order.findUnique({
         where: { orderCode: data.order_id },
-        include: { items: true },
+        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
       });
     }
 
@@ -307,14 +315,16 @@ export class OrderService {
     const limit = Math.max(1, Math.min(50, data.limit || 10));
     const skip = (page - 1) * limit;
 
+    const where = data.customer_id && data.customer_id !== 'ALL' ? { customerId: data.customer_id } : {};
+
     const [total, orders] = await Promise.all([
-      this.prisma.order.count({ where: { customerId: data.customer_id } }),
+      this.prisma.order.count({ where }),
       this.prisma.order.findMany({
-        where: { customerId: data.customer_id },
+        where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { items: true },
+        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
       }),
     ]);
 
@@ -561,6 +571,127 @@ export class OrderService {
     }
   }
 
+  async updateDeliveryStatus(data: UpdateDeliveryStatusRequest): Promise<UpdateDeliveryStatusResponse> {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.order_id);
+    let order: OrderWithItems | null = null;
+
+    if (isUuid) {
+      order = await this.prisma.order.findUnique({
+        where: { id: data.order_id },
+        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
+      });
+    }
+
+    if (!order) {
+      order = await this.prisma.order.findUnique({
+        where: { orderCode: data.order_id },
+        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
+      });
+    }
+
+    if (!order) {
+      throw new RpcException({
+        code: status.NOT_FOUND,
+        message: `Không tìm thấy đơn hàng với mã hoặc ID: ${data.order_id}`,
+      });
+    }
+
+    const currentStatus = order.orderStatus;
+    const targetStatus = data.new_status as OrderPrisma.OrderStatus;
+
+    if (currentStatus === OrderPrisma.OrderStatus.CANCELLED) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message: 'Đơn hàng đã bị hủy, không thể thay đổi tiến trình vận chuyển',
+      });
+    }
+
+    if (currentStatus === OrderPrisma.OrderStatus.DELIVERED && targetStatus !== OrderPrisma.OrderStatus.DELIVERED) {
+      throw new RpcException({
+        code: status.FAILED_PRECONDITION,
+        message: 'Đơn hàng đã giao thành công, không thể chuyển ngược về trạng thái trước',
+      });
+    }
+
+    const updateData: OrderPrisma.Prisma.OrderUpdateInput = {
+      orderStatus: targetStatus,
+    };
+
+    let historyNote = data.note;
+    let historyLocation = data.location;
+
+    if (targetStatus === OrderPrisma.OrderStatus.CONFIRMED) {
+      historyNote = historyNote || 'Đơn hàng đã được xác nhận và chuẩn bị đóng gói xuất kho';
+      historyLocation = historyLocation || 'Kho tổng Novatech Logistics';
+
+      // Chuyển reservation sang COMMITTED
+      await this.prisma.inventoryReservation.updateMany({
+        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
+        data: { status: OrderPrisma.ReservationStatus.COMMITTED, expiresAt: null },
+      });
+    } else if (targetStatus === OrderPrisma.OrderStatus.SHIPPING) {
+      updateData.shippedAt = new Date();
+      if (data.carrier_name) {
+        updateData.carrierName = data.carrier_name;
+      } else if (!order.carrierName) {
+        updateData.carrierName = 'Giao Hàng Nhanh (GHN)';
+      }
+      if (data.tracking_code) {
+        updateData.trackingCode = data.tracking_code;
+      } else if (!order.trackingCode) {
+        updateData.trackingCode = `GHN${Date.now().toString().slice(-8)}${Math.floor(1000 + Math.random() * 9000)}`;
+      }
+      historyNote = historyNote || `Đơn hàng đã bàn giao cho shipper của ${updateData.carrierName || order.carrierName}`;
+      historyLocation = historyLocation || 'Kho trung chuyển Tân Bình, TP. Hồ Chí Minh';
+    } else if (targetStatus === OrderPrisma.OrderStatus.DELIVERED) {
+      updateData.deliveredAt = new Date();
+      // Nếu phương thức là COD, shipper giao hàng kiêm thu tiền -> đánh dấu PAID
+      if (order.paymentMethod === OrderPrisma.PaymentMethod.COD && order.paymentStatus !== OrderPrisma.PaymentStatus.PAID) {
+        updateData.paymentStatus = OrderPrisma.PaymentStatus.PAID;
+      }
+      historyNote = historyNote || 'Giao hàng thành công. Khách hàng đã nhận kiện hàng nguyên vẹn';
+      historyLocation = historyLocation || 'Địa chỉ nhận hàng của khách';
+    } else if (targetStatus === OrderPrisma.OrderStatus.CANCELLED) {
+      updateData.cancelReason = data.note || 'Hủy đơn hàng trong quá trình vận chuyển';
+      historyNote = historyNote || 'Đơn hàng đã bị hủy';
+      historyLocation = historyLocation || 'Trung tâm xử lý hoàn hàng';
+
+      await this.prisma.inventoryReservation.updateMany({
+        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
+        data: { status: OrderPrisma.ReservationStatus.RELEASED },
+      });
+      for (const item of order.items) {
+        await this.safeRestoreRedisStock(item.skuId, item.quantity);
+      }
+    }
+
+    const updatedOrder = await this.prisma.order.update({
+      where: { id: order.id },
+      data: {
+        ...updateData,
+        statusHistory: {
+          create: {
+            fromStatus: currentStatus,
+            toStatus: targetStatus,
+            note: historyNote,
+            location: historyLocation,
+            changedBy: data.changed_by || 'LOGISTICS_SIMULATOR',
+          },
+        },
+      },
+      include: {
+        items: true,
+        statusHistory: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    return {
+      success: true,
+      message: `Cập nhật trạng thái đơn hàng sang ${targetStatus} thành công`,
+      order: this.mapOrderToDto(updatedOrder),
+    };
+  }
+
   private mapOrderToDto(order: OrderWithItems): OrderDto {
     return {
       id: order.id,
@@ -582,7 +713,10 @@ export class OrderService {
       order_status: order.orderStatus,
       voucher_code: order.voucherCode || undefined,
       cancel_reason: order.cancelReason || undefined,
-      note: order.note || undefined,
+      note:
+        order.statusHistory && order.statusHistory.length > 0
+          ? order.statusHistory[order.statusHistory.length - 1].note || undefined
+          : undefined,
       items: order.items.map((i) => ({
         id: i.id,
         sku_id: i.skuId,
@@ -595,6 +729,20 @@ export class OrderService {
         thumbnail_url: i.thumbnailUrl || undefined,
       })),
       created_at: order.createdAt.toISOString(),
+      tracking_code: order.trackingCode || undefined,
+      carrier_name: order.carrierName || undefined,
+      shipping_method: order.shippingMethod || undefined,
+      shipped_at: order.shippedAt ? order.shippedAt.toISOString() : undefined,
+      delivered_at: order.deliveredAt ? order.deliveredAt.toISOString() : undefined,
+      status_history: (order.statusHistory || []).map((h) => ({
+        id: h.id,
+        from_status: h.fromStatus,
+        to_status: h.toStatus,
+        note: h.note || undefined,
+        location: h.location || undefined,
+        changed_by: h.changedBy,
+        created_at: h.createdAt.toISOString(),
+      })),
     };
   }
 }

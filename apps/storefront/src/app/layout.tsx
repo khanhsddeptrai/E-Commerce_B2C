@@ -3,11 +3,9 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
-import { Navbar } from "@/components/Navbar";
-import { CartDrawer } from "@/components/CartDrawer";
+import { StorefrontShell } from "@/components/StorefrontShell";
 import { Toast } from "@/components/Toast";
 import { ScrollToTop } from "@/components/ScrollToTop";
-import { Footer } from "@/components/Footer";
 
 const inter = Inter({
   subsets: ["latin", "vietnamese"],
@@ -33,12 +31,9 @@ export default function RootLayout({
       >
         <AuthProvider>
           <CartProvider>
-            <Navbar />
-            <main className="flex-1">{children}</main>
-            <CartDrawer />
+            <StorefrontShell>{children}</StorefrontShell>
             <Toast />
             <ScrollToTop />
-            <Footer />
           </CartProvider>
         </AuthProvider>
       </body>

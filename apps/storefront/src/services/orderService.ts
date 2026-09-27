@@ -104,4 +104,56 @@ export const orderService = {
       return { success: false, message: msg };
     }
   },
+
+  async updateDeliveryStatus(
+    orderId: string,
+    payload: {
+      new_status: string;
+      location?: string;
+      note?: string;
+      carrier_name?: string;
+      tracking_code?: string;
+      changed_by?: string;
+    }
+  ): Promise<{ success: boolean; message: string; order?: ApiOrderDto }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(orderId)}/delivery-status`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      return {
+        success: Boolean(data.success),
+        message: data.message || "",
+        order: data.order as ApiOrderDto | undefined,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Lỗi kết nối khi cập nhật vận chuyển";
+      return { success: false, message: msg };
+    }
+  },
+
+  async getAllOrdersForAdmin(page = 1, limit = 20): Promise<{ orders: ApiOrderDto[]; total: number }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/orders/admin/all?page=${page}&limit=${limit}`, {
+        cache: "no-store",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          orders: (data.orders || []) as ApiOrderDto[],
+          total: Number(data.total || 0),
+        };
+      }
+    } catch (err: unknown) {
+      console.warn("[orderService.getAllOrdersForAdmin] Error:", err);
+    }
+    return { orders: [], total: 0 };
+  },
 };
+

@@ -14,6 +14,8 @@ import {
   ProcessPaymentSuccessResponse,
   ProcessPaymentFailedRequest,
   ProcessPaymentFailedResponse,
+  UpdateDeliveryStatusRequest,
+  UpdateDeliveryStatusResponse,
 } from '@repo/proto';
 
 @Controller()
@@ -49,4 +51,10 @@ export class OrderController {
   async processPaymentFailed(data: ProcessPaymentFailedRequest): Promise<ProcessPaymentFailedResponse> {
     return this.orderService.processPaymentFailed(data);
   }
+
+  @GrpcMethod('OrderService', 'UpdateDeliveryStatus')
+  async updateDeliveryStatus(data: UpdateDeliveryStatusRequest): Promise<UpdateDeliveryStatusResponse> {
+    return this.orderService.updateDeliveryStatus(data);
+  }
 }
+

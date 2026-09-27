@@ -9,6 +9,7 @@ service OrderService {
   rpc CancelOrder (CancelOrderRequest) returns (CancelOrderResponse);
   rpc ProcessPaymentSuccess (ProcessPaymentSuccessRequest) returns (ProcessPaymentSuccessResponse);
   rpc ProcessPaymentFailed (ProcessPaymentFailedRequest) returns (ProcessPaymentFailedResponse);
+  rpc UpdateDeliveryStatus (UpdateDeliveryStatusRequest) returns (UpdateDeliveryStatusResponse);
 }
 
 message OrderItemInputDto {
@@ -40,6 +41,16 @@ message OrderItemDto {
   optional string thumbnail_url = 9;
 }
 
+message OrderStatusHistoryDto {
+  string id = 1;
+  string from_status = 2;
+  string to_status = 3;
+  optional string note = 4;
+  optional string location = 5;
+  string changed_by = 6;
+  string created_at = 7;
+}
+
 message OrderDto {
   string id = 1;
   string order_code = 2;
@@ -60,6 +71,12 @@ message OrderDto {
   optional string note = 17;
   repeated OrderItemDto items = 18;
   string created_at = 19;
+  optional string tracking_code = 20;
+  optional string carrier_name = 21;
+  optional string shipping_method = 22;
+  optional string shipped_at = 23;
+  optional string delivered_at = 24;
+  repeated OrderStatusHistoryDto status_history = 25;
 }
 
 message CreateOrderResponse {
@@ -120,4 +137,20 @@ message ProcessPaymentFailedRequest {
 message ProcessPaymentFailedResponse {
   bool success = 1;
   string message = 2;
+}
+
+message UpdateDeliveryStatusRequest {
+  string order_id = 1;
+  string new_status = 2;
+  optional string location = 3;
+  optional string note = 4;
+  optional string carrier_name = 5;
+  optional string tracking_code = 6;
+  string changed_by = 7;
+}
+
+message UpdateDeliveryStatusResponse {
+  bool success = 1;
+  string message = 2;
+  optional OrderDto order = 3;
 }

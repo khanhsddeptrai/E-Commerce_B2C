@@ -190,6 +190,16 @@ export interface ApiOrderItemDto {
   thumbnail_url?: string;
 }
 
+export interface ApiOrderStatusHistoryDto {
+  id: string;
+  from_status: string;
+  to_status: string;
+  note?: string;
+  location?: string;
+  changed_by: string;
+  created_at: string;
+}
+
 export interface ApiOrderDto {
   id: string;
   order_code: string;
@@ -210,6 +220,12 @@ export interface ApiOrderDto {
   note?: string;
   items: ApiOrderItemDto[];
   created_at: string;
+  tracking_code?: string;
+  carrier_name?: string;
+  shipping_method?: string;
+  shipped_at?: string;
+  delivered_at?: string;
+  status_history?: ApiOrderStatusHistoryDto[];
 }
 
 export interface CreateOrderPayload {

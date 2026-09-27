@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ShoppingBag, Search, Menu, X, Cpu, Sparkles, ChevronRight, User, LogOut, Package, ChevronDown } from "lucide-react";
+import { ShoppingBag, Search, Menu, X, Cpu, Sparkles, ChevronRight, User, LogOut, Package, ChevronDown, ShieldCheck } from "lucide-react";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { productService } from "@/services/productService";
@@ -235,6 +235,15 @@ export function Navbar() {
                       <p className="text-xs font-bold text-slate-900 truncate">{user.fullName}</p>
                       <p className="text-[11px] text-slate-500 truncate">{user.email}</p>
                     </div>
+                    {user.role === 'ADMIN' && (
+                      <Link
+                        href="/admin/orders"
+                        onClick={() => setIsUserMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 rounded-xl transition-colors mb-1 border border-indigo-100"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-indigo-600" /> Bảng Quản Trị (Admin)
+                      </Link>
+                    )}
                     <Link
                       href="/account/profile"
                       onClick={() => setIsUserMenuOpen(false)}
@@ -361,6 +370,15 @@ export function Navbar() {
                     <p className="text-xs font-bold text-slate-900">{user.fullName}</p>
                     <p className="text-[11px] text-slate-500">{user.email}</p>
                   </div>
+                  {user.role === 'ADMIN' && (
+                    <Link
+                      href="/admin/orders"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 text-sm font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-100"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-indigo-600" /> Bảng Quản Trị (Admin)
+                    </Link>
+                  )}
                   <Link
                     href="/account/profile"
                     onClick={() => setIsMobileMenuOpen(false)}

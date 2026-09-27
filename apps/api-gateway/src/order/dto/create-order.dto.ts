@@ -64,3 +64,56 @@ export class CancelOrderDto {
   @IsNotEmpty()
   reason!: string;
 }
+
+export class UpdateDeliveryStatusDto {
+  @IsString()
+  @IsNotEmpty()
+  new_status!: string;
+
+  @IsString()
+  @IsOptional()
+  location?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+
+  @IsString()
+  @IsOptional()
+  carrier_name?: string;
+
+  @IsString()
+  @IsOptional()
+  tracking_code?: string;
+
+  @IsString()
+  @IsOptional()
+  changed_by?: string;
+}
+
+export class CarrierWebhookDto {
+  @IsString()
+  @IsNotEmpty()
+  order_code!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  status!: string;
+
+  @IsString()
+  @IsOptional()
+  location?: string;
+
+  @IsString()
+  @IsOptional()
+  carrier_name?: string;
+
+  @IsString()
+  @IsOptional()
+  tracking_code?: string;
+
+  @IsString()
+  @IsOptional()
+  note?: string;
+}
+

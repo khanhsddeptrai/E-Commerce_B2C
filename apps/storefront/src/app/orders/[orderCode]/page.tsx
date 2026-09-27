@@ -23,6 +23,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   HelpCircle,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { orderService } from '@/services/orderService';
 import { ApiOrderDto } from '@/types/ecommerce';
@@ -41,6 +43,7 @@ export default function OrderDetailsPage({ params }: PageProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [copiedTracking, setCopiedTracking] = useState(false);
 
   useEffect(() => {
     if (!orderCode) return;
@@ -107,12 +110,11 @@ export default function OrderDetailsPage({ params }: PageProps) {
     }
   };
 
-  // Tính bước hiện tại trong tiến trình vận chuyển
+  // Tính bước hiện tại trong tiến trình vận chuyển (Chuẩn 4 bước)
   const getTimelineStep = (orderStatus: string, paymentStatus: string) => {
     if (orderStatus === 'CANCELLED') return -1;
-    if (orderStatus === 'DELIVERED') return 5;
-    if (orderStatus === 'SHIPPING') return 4;
-    if (orderStatus === 'PROCESSING') return 3;
+    if (orderStatus === 'DELIVERED') return 4;
+    if (orderStatus === 'SHIPPING') return 3;
     if (orderStatus === 'CONFIRMED' || paymentStatus === 'PAID') return 2;
     return 1; // PENDING
   };
@@ -165,6 +167,13 @@ export default function OrderDetailsPage({ params }: PageProps) {
   } catch {
     shippingParsed = { fullAddress: order.shipping_address_json };
   }
+
+  const timelineSteps = [
+    { step: 1, title: 'Đã Đặt Hàng', desc: 'Chờ xác nhận / thanh toán' },
+    { step: 2, title: 'Đã Xác Nhận', desc: 'Chuẩn bị đóng gói xuất kho' },
+    { step: 3, title: 'Đang Giao Hàng', desc: 'Shipper đang vận chuyển' },
+    { step: 4, title: 'Giao Thành Công', desc: 'Đã nhận kiện hàng' },
+  ];
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -234,30 +243,24 @@ export default function OrderDetailsPage({ params }: PageProps) {
           </div>
         )}
 
-        {/* ORDER TRACKING TIMELINE UI */}
+        {/* ORDER TRACKING TIMELINE UI (4 BƯỚC CHUẨN) */}
         {order.order_status !== 'CANCELLED' && (
-          <div className="pt-2 pb-4 space-y-6">
+          <div className="pt-2 pb-2 space-y-6">
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <Truck className="w-4 h-4 text-indigo-600" />
-              Tiến Trình Đơn Hàng
+              Tiến Trình Đơn Hàng (4 Bước)
             </h2>
 
-            {/* Desktop Stepper */}
+            {/* Desktop Stepper 4 Cột */}
             <div className="relative">
-              <div className="hidden sm:grid grid-cols-5 gap-2 text-center relative z-10">
-                {[
-                  { step: 1, title: 'Đã Đặt Hàng', desc: 'Chờ thanh toán / xác nhận' },
-                  { step: 2, title: 'Đã Xác Nhận', desc: 'Đã thanh toán thành công' },
-                  { step: 3, title: 'Đang Đóng Gói', desc: 'Kiểm tra & xuất kho' },
-                  { step: 4, title: 'Đang Giao Hàng', desc: 'Shipper đang trên đường giao' },
-                  { step: 5, title: 'Giao Thành Công', desc: 'Đã nhận kiện hàng' },
-                ].map((s) => {
+              <div className="hidden sm:grid grid-cols-4 gap-4 text-center relative z-10">
+                {timelineSteps.map((s) => {
                   const isDone = currentStep >= s.step;
                   const isCurrent = currentStep === s.step;
                   return (
                     <div key={s.step} className="flex flex-col items-center space-y-2">
                       <div
-                        className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-sm ${
+                        className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold transition-all shadow-sm ${
                           isDone
                             ? 'bg-indigo-600 text-white'
                             : 'bg-slate-100 text-slate-400 border border-slate-200'
@@ -280,25 +283,19 @@ export default function OrderDetailsPage({ params }: PageProps) {
                 })}
               </div>
 
-              {/* Connecting line */}
-              <div className="hidden sm:block absolute top-4 left-[10%] right-[10%] h-0.5 bg-slate-200 -z-0">
+              {/* Connecting line 4 steps */}
+              <div className="hidden sm:block absolute top-5 left-[12%] right-[12%] h-0.5 bg-slate-200 -z-0">
                 <div
                   className="h-full bg-indigo-600 transition-all duration-500"
                   style={{
-                    width: `${Math.max(0, Math.min(100, ((currentStep - 1) / 4) * 100))}%`,
+                    width: `${Math.max(0, Math.min(100, ((currentStep - 1) / 3) * 100))}%`,
                   }}
                 />
               </div>
 
               {/* Mobile Timeline Vertical */}
               <div className="sm:hidden space-y-4 pl-4 border-l-2 border-indigo-600/30 ml-2">
-                {[
-                  { step: 1, title: 'Đã Đặt Hàng', desc: 'Chờ thanh toán / xác nhận' },
-                  { step: 2, title: 'Đã Xác Nhận', desc: 'Đã thanh toán thành công' },
-                  { step: 3, title: 'Đang Đóng Gói', desc: 'Kiểm tra & xuất kho' },
-                  { step: 4, title: 'Đang Giao Hàng', desc: 'Shipper đang trên đường giao' },
-                  { step: 5, title: 'Giao Thành Công', desc: 'Đã nhận kiện hàng' },
-                ].map((s) => {
+                {timelineSteps.map((s) => {
                   const isDone = currentStep >= s.step;
                   return (
                     <div key={s.step} className="flex items-start gap-3">
@@ -320,6 +317,73 @@ export default function OrderDetailsPage({ params }: PageProps) {
                 })}
               </div>
             </div>
+
+            {/* Carrier & Tracking Code Badge */}
+            {(order.carrier_name || order.tracking_code) && (
+              <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/90 rounded-2xl p-4 border border-slate-200/70">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+                    <Truck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500 font-medium">Đơn vị vận chuyển</p>
+                    <p className="text-xs font-bold text-slate-900">{order.carrier_name || 'Giao Hàng Nhanh (GHN)'}</p>
+                  </div>
+                </div>
+
+                {order.tracking_code && (
+                  <div className="flex items-center gap-3">
+                    <div className="text-left sm:text-right">
+                      <p className="text-[11px] text-slate-500 font-medium">Mã vận đơn</p>
+                      <p className="text-xs font-mono font-bold text-indigo-600">{order.tracking_code}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (order.tracking_code) {
+                          navigator.clipboard.writeText(order.tracking_code);
+                          setCopiedTracking(true);
+                          setTimeout(() => setCopiedTracking(false), 2000);
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:border-indigo-300 text-slate-700 hover:text-indigo-600 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
+                      title="Sao chép mã vận đơn"
+                    >
+                      {copiedTracking ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedTracking ? 'Đã sao chép' : 'Sao chép'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Status History Journey Accordion / List */}
+            {order.status_history && order.status_history.length > 0 && (
+              <div className="mt-4 pt-3 border-t border-slate-100">
+                <p className="text-xs font-bold text-slate-800 mb-3 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-indigo-600" /> Lịch sử hành trình kiện hàng
+                </p>
+                <div className="space-y-2.5">
+                  {order.status_history.map((hist, idx) => (
+                    <div key={hist.id || idx} className="flex items-start gap-3 text-xs bg-white p-3 rounded-xl border border-slate-100 shadow-2xs">
+                      <div className="w-2 h-2 rounded-full bg-indigo-600 mt-1.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-bold text-slate-900">{hist.to_status}</span>
+                          <span className="text-[11px] text-slate-400">{formatDate(hist.created_at)}</span>
+                        </div>
+                        {hist.note && <p className="text-slate-600 mt-0.5">{hist.note}</p>}
+                        {hist.location && (
+                          <p className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1">
+                            <MapPin className="w-3 h-3 text-slate-400" /> {hist.location}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
