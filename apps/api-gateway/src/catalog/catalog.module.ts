@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { PRODUCT_PACKAGE_NAME, PRODUCT_PROTO_PATH } from '@repo/proto';
 import { CatalogController } from './catalog.controller';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
   imports: [
+    AuthModule,
     ClientsModule.register([
       {
         name: 'PRODUCT_PACKAGE',

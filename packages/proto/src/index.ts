@@ -104,6 +104,25 @@ export interface AuthServiceClient {
 export const PRODUCT_PROTO_PATH = getProtoPath('product.proto');
 export const PRODUCT_PACKAGE_NAME = 'product';
 
+export interface BrandDto {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url?: string;
+}
+
+export interface GetBrandsRequest {
+  page?: number;
+  limit?: number;
+}
+
+export interface GetBrandsResponse {
+  brands: BrandDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface CategoryDto {
   id: string;
   name: string;
@@ -156,6 +175,7 @@ export interface ProductDto {
   specs: ProductSpecDto[];
   variants: ProductSkuDto[];
   created_at: string;
+  status: string;
 }
 
 export interface GetProductsRequest {
@@ -177,6 +197,21 @@ export interface GetProductsResponse {
   limit: number;
 }
 
+export interface GetAdminProductsRequest {
+  page?: number;
+  limit?: number;
+  search_query?: string;
+  category_id?: string;
+  status?: string;
+}
+
+export interface GetAdminProductsResponse {
+  products: ProductDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
 export interface GetProductBySlugRequest {
   slug: string;
 }
@@ -185,16 +220,89 @@ export interface GetProductBySlugResponse {
   product: ProductDto;
 }
 
-export interface GetCategoriesRequest {}
+export interface GetCategoriesRequest {
+  page?: number;
+  limit?: number;
+}
 
 export interface GetCategoriesResponse {
   categories: CategoryDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface CreateSkuInput {
+  sku_code: string;
+  name: string;
+  color_name: string;
+  color_hex: string;
+  price: number;
+  original_price?: number;
+  stock_quantity: number;
+  image_url?: string;
+  specs_json?: string;
+}
+
+export interface CreateProductRequest {
+  name: string;
+  slug: string;
+  category_id: string;
+  brand_id?: string;
+  tagline?: string;
+  description: string;
+  thumbnail_url: string;
+  base_price: number;
+  original_price?: number;
+  featured: boolean;
+  is_flash_sale: boolean;
+  badge?: string;
+  status: string;
+  images: string[];
+  specs: ProductSpecDto[];
+  variants: CreateSkuInput[];
+}
+
+export interface UpdateProductRequest {
+  id: string;
+  name: string;
+  slug: string;
+  category_id: string;
+  brand_id?: string;
+  tagline?: string;
+  description: string;
+  thumbnail_url: string;
+  base_price: number;
+  original_price?: number;
+  featured: boolean;
+  is_flash_sale: boolean;
+  badge?: string;
+  status: string;
+  images: string[];
+  specs: ProductSpecDto[];
+}
+
+export interface UpdateProductStatusRequest {
+  id: string;
+  status: string;
+}
+
+export interface UpdateSkuStockRequest {
+  sku_id: string;
+  stock_quantity: number;
+  price?: number;
 }
 
 export interface ProductServiceClient {
   getProducts(request: GetProductsRequest): Observable<GetProductsResponse>;
   getProductBySlug(request: GetProductBySlugRequest): Observable<GetProductBySlugResponse>;
   getCategories(request: GetCategoriesRequest): Observable<GetCategoriesResponse>;
+  getAdminProducts(request: GetAdminProductsRequest): Observable<GetAdminProductsResponse>;
+  createProduct(request: CreateProductRequest): Observable<ProductDto>;
+  updateProduct(request: UpdateProductRequest): Observable<ProductDto>;
+  updateProductStatus(request: UpdateProductStatusRequest): Observable<ProductDto>;
+  updateSkuStock(request: UpdateSkuStockRequest): Observable<ProductSkuDto>;
+  getBrands(request: GetBrandsRequest): Observable<GetBrandsResponse>;
 }
 
 export const ORDER_PROTO_PATH = getProtoPath('order.proto');

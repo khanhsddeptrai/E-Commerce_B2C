@@ -6,6 +6,31 @@ service ProductService {
   rpc GetProducts (GetProductsRequest) returns (GetProductsResponse);
   rpc GetProductBySlug (GetProductBySlugRequest) returns (GetProductBySlugResponse);
   rpc GetCategories (GetCategoriesRequest) returns (GetCategoriesResponse);
+  rpc GetAdminProducts (GetAdminProductsRequest) returns (GetAdminProductsResponse);
+  rpc CreateProduct (CreateProductRequest) returns (ProductDto);
+  rpc UpdateProduct (UpdateProductRequest) returns (ProductDto);
+  rpc UpdateProductStatus (UpdateProductStatusRequest) returns (ProductDto);
+  rpc UpdateSkuStock (UpdateSkuStockRequest) returns (ProductSkuDto);
+  rpc GetBrands (GetBrandsRequest) returns (GetBrandsResponse);
+}
+
+message BrandDto {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  optional string logo_url = 4;
+}
+
+message GetBrandsRequest {
+  optional int32 page = 1;
+  optional int32 limit = 2;
+}
+
+message GetBrandsResponse {
+  repeated BrandDto brands = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
 }
 
 message CategoryDto {
@@ -60,6 +85,7 @@ message ProductDto {
   repeated ProductSpecDto specs = 21;
   repeated ProductSkuDto variants = 22;
   string created_at = 23;
+  string status = 24;
 }
 
 message GetProductsRequest {
@@ -81,6 +107,21 @@ message GetProductsResponse {
   int32 limit = 4;
 }
 
+message GetAdminProductsRequest {
+  optional int32 page = 1;
+  optional int32 limit = 2;
+  optional string search_query = 3;
+  optional string category_id = 4;
+  optional string status = 5;
+}
+
+message GetAdminProductsResponse {
+  repeated ProductDto products = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
 message GetProductBySlugRequest {
   string slug = 1;
 }
@@ -89,8 +130,75 @@ message GetProductBySlugResponse {
   ProductDto product = 1;
 }
 
-message GetCategoriesRequest {}
+message GetCategoriesRequest {
+  optional int32 page = 1;
+  optional int32 limit = 2;
+}
 
 message GetCategoriesResponse {
   repeated CategoryDto categories = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message CreateSkuInput {
+  string sku_code = 1;
+  string name = 2;
+  string color_name = 3;
+  string color_hex = 4;
+  double price = 5;
+  optional double original_price = 6;
+  int32 stock_quantity = 7;
+  optional string image_url = 8;
+  optional string specs_json = 9;
+}
+
+message CreateProductRequest {
+  string name = 1;
+  string slug = 2;
+  string category_id = 3;
+  optional string brand_id = 4;
+  optional string tagline = 5;
+  string description = 6;
+  string thumbnail_url = 7;
+  double base_price = 8;
+  optional double original_price = 9;
+  bool featured = 10;
+  bool is_flash_sale = 11;
+  optional string badge = 12;
+  string status = 13;
+  repeated string images = 14;
+  repeated ProductSpecDto specs = 15;
+  repeated CreateSkuInput variants = 16;
+}
+
+message UpdateProductRequest {
+  string id = 1;
+  string name = 2;
+  string slug = 3;
+  string category_id = 4;
+  optional string brand_id = 5;
+  optional string tagline = 6;
+  string description = 7;
+  string thumbnail_url = 8;
+  double base_price = 9;
+  optional double original_price = 10;
+  bool featured = 11;
+  bool is_flash_sale = 12;
+  optional string badge = 13;
+  string status = 14;
+  repeated string images = 15;
+  repeated ProductSpecDto specs = 16;
+}
+
+message UpdateProductStatusRequest {
+  string id = 1;
+  string status = 2;
+}
+
+message UpdateSkuStockRequest {
+  string sku_id = 1;
+  int32 stock_quantity = 2;
+  optional double price = 3;
 }
