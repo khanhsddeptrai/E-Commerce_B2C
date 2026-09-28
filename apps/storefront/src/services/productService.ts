@@ -5,6 +5,9 @@ import {
   ApiProductDto,
   ApiCategoryDto,
   ApiProductSkuDto,
+  Brand,
+  CreateProductInput,
+  UpdateProductInput,
 } from "@/types/ecommerce";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "http://localhost:8000/api/v1";
@@ -43,6 +46,7 @@ function mapApiProductToProduct(api: ApiProductDto): Product {
       image: v.image_url || v.image || "",
     })),
     createdAt: api.created_at || api.createdAt || new Date().toISOString(),
+    status: api.status || 'PUBLISHED',
   };
 }
 
@@ -150,9 +154,8 @@ export const productService = {
       });
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data)) {
-          return data.map(mapApiCategoryToCategory);
-        }
+        const rawList = Array.isArray(data) ? data : data.categories || [];
+        return rawList.map(mapApiCategoryToCategory);
       }
     } catch (err: unknown) {
       console.error("[productService.getCategories] Error:", err);
@@ -178,9 +181,176 @@ export const productService = {
             .slice(0, limit);
         }
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("[productService.getRelatedProducts] Error:", err);
     }
     return [];
   },
+
+  // --- ADMIN API CLIENT METHODS ---
+
+  async getAdminProducts(params?: {
+    category?: string;
+    search?: string;
+    status?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ products: Product[]; total: number; page: number; limit: number }> {
+    try {
+      const q = new URLSearchParams();
+      if (params?.category && params.category !== 'all') q.set('category', params.category);
+      if (params?.search?.trim()) q.set('search', params.search.trim());
+      if (params?.status && params.status !== 'ALL') q.set('status', params.status);
+      if (params?.page) q.set('page', String(params.page));
+      if (params?.limit) q.set('limit', String(params.limit));
+
+      const res = await fetch(`${API_BASE_URL}/admin/products?${q.toString()}`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          products: (data.products || []).map(mapApiProductToProduct),
+          total: data.total || 0,
+          page: data.page || 1,
+          limit: data.limit || 20,
+        };
+      }
+    } catch (err: unknown) {
+      console.error('[productService.getAdminProducts] Error:', err);
+    }
+    return { products: [], total: 0, page: 1, limit: 20 };
+  },
+
+  async getBrands(): Promise<Brand[]> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/brands`, {
+        next: { revalidate: 60 },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.brands)) return data.brands;
+      }
+    } catch (err: unknown) {
+      console.error('[productService.getBrands] Error:', err);
+    }
+    return [];
+  },
+
+  async createProduct(input: CreateProductInput): Promise<{ success: boolean; product?: Product; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/products`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data?.message || 'Không thể tạo sản phẩm' };
+      }
+      return { success: true, product: mapApiProductToProduct(data) };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi kết nối khi tạo sản phẩm';
+      return { success: false, error: msg };
+    }
+  },
+
+  async updateProduct(id: string, input: UpdateProductInput): Promise<{ success: boolean; product?: Product; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/products/${id}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data?.message || 'Không thể cập nhật sản phẩm' };
+      }
+      return { success: true, product: mapApiProductToProduct(data) };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi kết nối khi cập nhật sản phẩm';
+      return { success: false, error: msg };
+    }
+  },
+
+  async updateProductStatus(
+    id: string,
+    status: 'PUBLISHED' | 'DRAFT' | 'ARCHIVED',
+  ): Promise<{ success: boolean; product?: Product; error?: string }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/products/${id}/status`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data?.message || 'Không thể cập nhật trạng thái' };
+      }
+      return { success: true, product: mapApiProductToProduct(data) };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi kết nối khi cập nhật trạng thái';
+      return { success: false, error: msg };
+    }
+  },
+
+  async updateSkuStock(
+    skuId: string,
+    stockQuantity: number,
+    price?: number,
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const body: { stock_quantity: number; price?: number } = { stock_quantity: stockQuantity };
+      if (price !== undefined) body.price = price;
+
+      const res = await fetch(`${API_BASE_URL}/admin/products/skus/${skuId}/stock`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        return { success: false, error: data?.message || 'Không thể cập nhật tồn kho SKU' };
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi kết nối khi cập nhật tồn kho SKU';
+      return { success: false, error: msg };
+    }
+  },
+
+  async uploadImage(file: File): Promise<{ success: boolean; url?: string; error?: string }> {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data?.error || 'Tải ảnh lên thất bại' };
+      }
+      return { success: true, url: data.url };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi khi tải ảnh lên';
+      return { success: false, error: msg };
+    }
+  },
 };
+

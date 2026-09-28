@@ -162,10 +162,10 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     },
     {
       name: 'Quản Lý Sản Phẩm',
-      href: '#',
+      href: '/admin/products',
       icon: Boxes,
-      active: false,
-      badge: 'Sắp ra mắt',
+      active: pathname === '/admin/products' || pathname.startsWith('/admin/products'),
+      badge: null,
     },
     {
       name: 'Khách Hàng',

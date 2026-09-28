@@ -36,6 +36,61 @@ export interface Product {
   }[];
   variants: ProductVariant[];
   createdAt: string;
+  status?: 'PUBLISHED' | 'DRAFT' | 'ARCHIVED';
+}
+
+export interface Brand {
+  id: string;
+  name: string;
+  slug: string;
+  logo_url?: string;
+}
+
+export interface CreateProductInput {
+  name: string;
+  slug?: string;
+  category_id: string;
+  brand_id?: string;
+  tagline?: string;
+  description: string;
+  thumbnail_url: string;
+  base_price: number;
+  original_price?: number;
+  featured?: boolean;
+  is_flash_sale?: boolean;
+  badge?: string;
+  status?: 'PUBLISHED' | 'DRAFT' | 'ARCHIVED';
+  images?: string[];
+  specs?: { label: string; value: string }[];
+  variants?: {
+    sku_code: string;
+    name: string;
+    color_name: string;
+    color_hex: string;
+    price: number;
+    original_price?: number;
+    stock_quantity: number;
+    image_url?: string;
+    specs_json?: string;
+  }[];
+}
+
+export interface UpdateProductInput {
+  name: string;
+  slug?: string;
+  category_id: string;
+  brand_id?: string;
+  tagline?: string;
+  description: string;
+  thumbnail_url: string;
+  base_price: number;
+  original_price?: number;
+  featured?: boolean;
+  is_flash_sale?: boolean;
+  badge?: string;
+  status?: 'PUBLISHED' | 'DRAFT' | 'ARCHIVED';
+  images?: string[];
+  specs?: { label: string; value: string }[];
 }
 
 export interface Category {
@@ -142,6 +197,7 @@ export interface ApiProductDto {
   variants?: ApiProductSkuDto[];
   created_at?: string;
   createdAt?: string;
+  status?: 'PUBLISHED' | 'DRAFT' | 'ARCHIVED';
 }
 
 export interface ApiCategoryDto {
