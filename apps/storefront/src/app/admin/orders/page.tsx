@@ -36,6 +36,7 @@ import {
 import { orderService } from '@/services/orderService';
 import { ApiOrderDto } from '@/types/ecommerce';
 import { Tooltip } from '@/components/Tooltip';
+import { ResizableDrawer } from '@/components/ResizableDrawer';
 
 type StatusFilter = 'ALL' | 'PENDING' | 'CONFIRMED' | 'SHIPPING' | 'DELIVERED' | 'CANCELLED';
 type PaymentMethodFilter = 'ALL' | 'COD' | 'VNPAY';
@@ -1018,54 +1019,94 @@ export default function AdminOrdersPage() {
       {/* SLIDE-OVER DRAWER: CHI TIẾT TOÀN DIỆN ĐƠN HÀNG (ENTERPRISE)     */}
       {/* ============================================================== */}
       {detailDrawerOrder && (
-        <div className="fixed inset-0 z-50 overflow-hidden">
-          {/* Backdrop mờ */}
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
-            onClick={() => setDetailDrawerOrder(null)}
-          />
+        <ResizableDrawer
+          isOpen={!!detailDrawerOrder}
+          onClose={() => setDetailDrawerOrder(null)}
+          storageKey="admin_drawer_width"
+          defaultWidth={880}
+          title={
+            <div className="flex items-center gap-2.5">
+              <span className="font-mono text-base font-black text-indigo-400">
+                {detailDrawerOrder.order_code}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleCopyTracking(detailDrawerOrder.order_code)}
+                title="Sao chép mã đơn"
+                className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                {copiedCode === detailDrawerOrder.order_code ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+          }
+          subtitle={
+            <span className="text-[11px] text-slate-400 flex items-center gap-1.5">
+              <Calendar className="w-3 h-3 text-slate-500" />
+              Đặt lúc: {formatDate(detailDrawerOrder.created_at)}
+            </span>
+          }
+          bodyClassName="p-5 sm:p-6 space-y-6"
+          footer={
+            <div className="flex items-center justify-between gap-3 w-full">
+              <button
+                type="button"
+                onClick={() => setDetailDrawerOrder(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Đóng
+              </button>
 
-          <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
-            <div className="w-screen max-w-2xl bg-[#0F172A] border-l border-slate-800 shadow-2xl flex flex-col text-white animate-in slide-in-from-right duration-250">
-              {/* Drawer Header */}
-              <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-mono text-base font-black text-indigo-400">
-                      {detailDrawerOrder.order_code}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => handleCopyTracking(detailDrawerOrder.order_code)}
-                      title="Sao chép mã đơn"
-                      className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors"
-                    >
-                      {copiedCode === detailDrawerOrder.order_code ? (
-                        <Check className="w-3.5 h-3.5 text-emerald-400" />
-                      ) : (
-                        <Copy className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                  </div>
-                  <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
-                    <Calendar className="w-3 h-3 text-slate-500" />
-                    Đặt lúc: {formatDate(detailDrawerOrder.created_at)}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2">
+                {detailDrawerOrder.order_status === 'PENDING' && (
                   <button
                     type="button"
-                    onClick={() => setDetailDrawerOrder(null)}
-                    className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    onClick={() => handleConfirmOrder(detailDrawerOrder)}
+                    disabled={processingOrderId === detailDrawerOrder.id}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 disabled:opacity-50 cursor-pointer"
                   >
-                    <X className="w-5 h-5" />
+                    {processingOrderId === detailDrawerOrder.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>Xác nhận đơn ngay</span>
                   </button>
-                </div>
-              </div>
+                )}
 
-              {/* Drawer Scrollable Content */}
-              <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-6 scrollbar-thin">
+                {detailDrawerOrder.order_status === 'CONFIRMED' && (
+                  <button
+                    type="button"
+                    onClick={() => openShippingModal(detailDrawerOrder)}
+                    className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 cursor-pointer"
+                  >
+                    <Truck className="w-3.5 h-3.5" />
+                    <span>Xuất kho bàn giao</span>
+                  </button>
+                )}
+
+                {detailDrawerOrder.order_status === 'SHIPPING' && (
+                  <button
+                    type="button"
+                    onClick={() => handleDelivered(detailDrawerOrder)}
+                    disabled={processingOrderId === detailDrawerOrder.id}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50 cursor-pointer"
+                  >
+                    {processingOrderId === detailDrawerOrder.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    )}
+                    <span>Giao thành công</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          }
+        >
                 {/* Khách hàng & Địa chỉ */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs bg-slate-950/70 p-4 rounded-2xl border border-slate-800/80">
                   <div className="space-y-1.5">
@@ -1298,66 +1339,8 @@ export default function AdminOrdersPage() {
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Drawer Footer Actions */}
-              <div className="p-4 border-t border-slate-800 bg-slate-950/80 flex items-center justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setDetailDrawerOrder(null)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
-                >
-                  Đóng
-                </button>
-
-                <div className="flex items-center gap-2">
-                  {detailDrawerOrder.order_status === 'PENDING' && (
-                    <button
-                      type="button"
-                      onClick={() => handleConfirmOrder(detailDrawerOrder)}
-                      disabled={processingOrderId === detailDrawerOrder.id}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 disabled:opacity-50"
-                    >
-                      {processingOrderId === detailDrawerOrder.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                      )}
-                      <span>Xác nhận đơn ngay</span>
-                    </button>
-                  )}
-
-                  {detailDrawerOrder.order_status === 'CONFIRMED' && (
-                    <button
-                      type="button"
-                      onClick={() => openShippingModal(detailDrawerOrder)}
-                      className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30"
-                    >
-                      <Truck className="w-3.5 h-3.5" />
-                      <span>Xuất kho bàn giao</span>
-                    </button>
-                  )}
-
-                  {detailDrawerOrder.order_status === 'SHIPPING' && (
-                    <button
-                      type="button"
-                      onClick={() => handleDelivered(detailDrawerOrder)}
-                      disabled={processingOrderId === detailDrawerOrder.id}
-                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-600/30 disabled:opacity-50"
-                    >
-                      {processingOrderId === detailDrawerOrder.id ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                      )}
-                      <span>Giao thành công</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        </ResizableDrawer>
       )}
 
       {/* ============================================================== */}

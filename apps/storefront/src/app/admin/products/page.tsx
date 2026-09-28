@@ -28,6 +28,7 @@ import {
 import { productService } from '@/services/productService';
 import { Product, Category, Brand, CreateProductInput, UpdateProductInput } from '@/types/ecommerce';
 import { Tooltip } from '@/components/Tooltip';
+import { ResizableDrawer } from '@/components/ResizableDrawer';
 
 type StatusFilter = 'ALL' | 'PUBLISHED' | 'DRAFT' | 'ARCHIVED';
 
@@ -919,70 +920,77 @@ export default function AdminProductsPage() {
       </div>
 
       {/* 5. Slide-over Drawer Thêm Mới / Sửa Sản Phẩm (Option 1A) */}
-      {drawerOpen && (
-        <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
-          {/* Backdrop */}
-          <div
-            className="fixed inset-0 bg-slate-950/80 backdrop-blur-xs transition-opacity"
-            onClick={() => setDrawerOpen(false)}
-          />
-
-          {/* Drawer Container */}
-          <div className="relative w-full max-w-2xl bg-slate-900 border-l border-slate-800 shadow-2xl flex flex-col h-full z-10 animate-in slide-in-from-right duration-300">
-            {/* Drawer Header */}
-            <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
-              <div>
-                <span className="text-base font-black text-white block">
-                  {editingProduct ? 'Chỉnh Sửa Sản Phẩm' : 'Thêm Sản Phẩm Mới'}
-                </span>
-                <span className="text-xs text-slate-400">
-                  {editingProduct ? editingProduct.name : 'Nhập thông tin chi tiết và biến thể SKU'}
-                </span>
-              </div>
-              <button
-                onClick={() => setDrawerOpen(false)}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Drawer Tabs */}
-            <div className="flex border-b border-slate-800 px-6 bg-slate-950/30">
-              <button
-                onClick={() => setDrawerTab('basic')}
-                className={`py-3 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
-                  drawerTab === 'basic'
-                    ? 'border-indigo-500 text-indigo-400'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Thông Tin Cơ Bản
-              </button>
-              <button
-                onClick={() => setDrawerTab('variants')}
-                className={`py-3 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
-                  drawerTab === 'variants'
-                    ? 'border-indigo-500 text-indigo-400'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Biến Thể SKU ({formSkus.length})
-              </button>
-              <button
-                onClick={() => setDrawerTab('media_specs')}
-                className={`py-3 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
-                  drawerTab === 'media_specs'
-                    ? 'border-indigo-500 text-indigo-400'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                Hình Ảnh & Thông Số
-              </button>
-            </div>
-
-            {/* Drawer Body */}
-            <form onSubmit={handleSubmitDrawer} className="flex-1 overflow-y-auto p-6 space-y-6">
+      <ResizableDrawer
+        isOpen={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        storageKey="admin_drawer_width"
+        defaultWidth={880}
+        title={editingProduct ? 'Chỉnh Sửa Sản Phẩm' : 'Thêm Sản Phẩm Mới'}
+        subtitle={editingProduct ? editingProduct.name : 'Nhập thông tin chi tiết và biến thể SKU'}
+        headerBottom={
+          <div className="flex px-6 bg-slate-950/30">
+            <button
+              type="button"
+              onClick={() => setDrawerTab('basic')}
+              className={`py-3 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+                drawerTab === 'basic'
+                  ? 'border-indigo-500 text-indigo-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Thông Tin Cơ Bản
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawerTab('variants')}
+              className={`py-3 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+                drawerTab === 'variants'
+                  ? 'border-indigo-500 text-indigo-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Biến Thể SKU ({formSkus.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setDrawerTab('media_specs')}
+              className={`py-3 px-3 text-xs font-bold border-b-2 transition-all cursor-pointer ${
+                drawerTab === 'media_specs'
+                  ? 'border-indigo-500 text-indigo-400'
+                  : 'border-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Hình Ảnh & Thông Số
+            </button>
+          </div>
+        }
+        bodyClassName="p-0 flex flex-col"
+        footer={
+          <div className="flex items-center justify-end gap-2.5 w-full">
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(false)}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+            >
+              Hủy Bỏ
+            </button>
+            <button
+              type="submit"
+              form="product-edit-form"
+              disabled={isSubmitting}
+              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2 cursor-pointer active:scale-95"
+            >
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Check className="w-4 h-4" />
+              )}
+              <span>{editingProduct ? 'Cập Nhật Sản Phẩm' : 'Tạo Sản Phẩm'}</span>
+            </button>
+          </div>
+        }
+      >
+        <form id="product-edit-form" onSubmit={handleSubmitDrawer} className="p-6 space-y-6 flex-1">
               {/* TAB 1: THÔNG TIN CƠ BẢN */}
               {drawerTab === 'basic' && (
                 <div className="space-y-4">
@@ -1438,7 +1446,7 @@ export default function AdminProductsPage() {
 
                     {/* Preview danh sách ảnh */}
                     {formImages.length > 0 && (
-                      <div className="grid grid-cols-4 gap-2.5 pt-2">
+                      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 pt-2">
                         {formImages.map((img, idx) => (
                           <div
                             key={idx}
@@ -1549,32 +1557,8 @@ export default function AdminProductsPage() {
                 </div>
               )}
 
-              {/* Drawer Footer Actions */}
-              <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-2.5 sticky bottom-0 bg-slate-900 pb-2">
-                <button
-                  type="button"
-                  onClick={() => setDrawerOpen(false)}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-                >
-                  Hủy Bỏ
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-600/25 flex items-center gap-2 cursor-pointer active:scale-95"
-                >
-                  {isSubmitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Check className="w-4 h-4" />
-                  )}
-                  <span>{editingProduct ? 'Cập Nhật Sản Phẩm' : 'Tạo Sản Phẩm'}</span>
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+        </form>
+      </ResizableDrawer>
 
       {/* 6. Modal Sửa Nhanh Tồn Kho & Giá SKU */}
       {stockModalProduct && (
