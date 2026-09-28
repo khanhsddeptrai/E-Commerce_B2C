@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { productService } from '@/services/productService';
 import { Product, Category, Brand, CreateProductInput, UpdateProductInput } from '@/types/ecommerce';
+import { Tooltip } from '@/components/Tooltip';
 
 type StatusFilter = 'ALL' | 'PUBLISHED' | 'DRAFT' | 'ARCHIVED';
 
@@ -728,43 +729,48 @@ export default function AdminProductsPage() {
                           </span>
                         </td>
 
-                        {/* Thao Tác (Icon-only buttons with tooltips) */}
+                        {/* Thao Tác (Icon-only buttons with custom top tooltips) */}
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             {/* Nút sửa nhanh tồn kho SKU */}
-                            <button
-                              onClick={() => handleOpenStockModal(p)}
-                              className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer active:scale-95"
-                              title="Sửa nhanh tồn kho & giá biến thể"
-                            >
-                              <Boxes className="w-3.5 h-3.5 text-indigo-400" />
-                            </button>
+                            <Tooltip content="Sửa tồn kho & giá SKU">
+                              <button
+                                onClick={() => handleOpenStockModal(p)}
+                                className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer active:scale-95"
+                              >
+                                <Boxes className="w-3.5 h-3.5 text-indigo-400" />
+                              </button>
+                            </Tooltip>
 
                             {/* Nút bật/tắt bán */}
-                            <button
-                              onClick={() => handleToggleStatus(p)}
-                              className={`p-2 rounded-lg transition-all cursor-pointer active:scale-95 ${
-                                p.status === 'PUBLISHED'
-                                  ? 'bg-slate-800/80 hover:bg-rose-950/60 text-slate-300 hover:text-rose-400'
-                                  : 'bg-slate-800/80 hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-400'
-                              }`}
-                              title={p.status === 'PUBLISHED' ? 'Chuyển sang Lưu kho' : 'Kích hoạt Đang bán'}
+                            <Tooltip
+                              content={p.status === 'PUBLISHED' ? 'Chuyển sang Lưu kho' : 'Kích hoạt Đang bán'}
                             >
-                              {p.status === 'PUBLISHED' ? (
-                                <Eye className="w-3.5 h-3.5 text-emerald-400" />
-                              ) : (
-                                <EyeOff className="w-3.5 h-3.5 text-slate-400" />
-                              )}
-                            </button>
+                              <button
+                                onClick={() => handleToggleStatus(p)}
+                                className={`p-2 rounded-lg transition-all cursor-pointer active:scale-95 ${
+                                  p.status === 'PUBLISHED'
+                                    ? 'bg-slate-800/80 hover:bg-rose-950/60 text-slate-300 hover:text-rose-400'
+                                    : 'bg-slate-800/80 hover:bg-emerald-950/60 text-slate-300 hover:text-emerald-400'
+                                }`}
+                              >
+                                {p.status === 'PUBLISHED' ? (
+                                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <EyeOff className="w-3.5 h-3.5 text-slate-400" />
+                                )}
+                              </button>
+                            </Tooltip>
 
                             {/* Nút chỉnh sửa toàn bộ */}
-                            <button
-                              onClick={() => handleOpenEditDrawer(p)}
-                              className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer active:scale-95"
-                              title="Chỉnh sửa chi tiết sản phẩm"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
+                            <Tooltip content="Chỉnh sửa chi tiết">
+                              <button
+                                onClick={() => handleOpenEditDrawer(p)}
+                                className="p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer active:scale-95"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                            </Tooltip>
                           </div>
                         </td>
                       </tr>

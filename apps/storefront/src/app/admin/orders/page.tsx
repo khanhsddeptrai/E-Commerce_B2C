@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { orderService } from '@/services/orderService';
 import { ApiOrderDto } from '@/types/ecommerce';
+import { Tooltip } from '@/components/Tooltip';
 
 type StatusFilter = 'ALL' | 'PENDING' | 'CONFIRMED' | 'SHIPPING' | 'DELIVERED' | 'CANCELLED';
 type PaymentMethodFilter = 'ALL' | 'COD' | 'VNPAY';
@@ -687,7 +688,7 @@ export default function AdminOrdersPage() {
                     <tr
                       key={order.id}
                       onClick={() => setDetailDrawerOrder(order)}
-                      className={`cursor-pointer transition-colors group ${
+                      className={`cursor-pointer transition-colors group/row ${
                         isSelected
                           ? 'bg-indigo-950/20 hover:bg-indigo-950/30'
                           : 'hover:bg-slate-800/40'
@@ -705,7 +706,7 @@ export default function AdminOrdersPage() {
                           {isSelected ? (
                             <CheckSquare className="w-4 h-4 text-indigo-400" />
                           ) : (
-                            <Square className="w-4 h-4 text-slate-600 group-hover:text-slate-400" />
+                            <Square className="w-4 h-4 text-slate-600 group-hover/row:text-slate-400" />
                           )}
                         </button>
                       </td>
@@ -848,109 +849,116 @@ export default function AdminOrdersPage() {
                       >
                         <div className="flex items-center justify-end gap-1.5">
                           {/* Nút Xem chi tiết (luôn có) */}
-                          <button
-                            type="button"
-                            onClick={() => setDetailDrawerOrder(order)}
-                            title="Xem chi tiết đơn hàng"
-                            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all border border-slate-700/60 shadow-xs cursor-pointer active:scale-95"
-                          >
-                            <Eye className="w-3.5 h-3.5 text-slate-300" />
-                          </button>
+                          <Tooltip content="Xem chi tiết đơn hàng">
+                            <button
+                              type="button"
+                              onClick={() => setDetailDrawerOrder(order)}
+                              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-all border border-slate-700/60 shadow-xs cursor-pointer active:scale-95"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-300" />
+                            </button>
+                          </Tooltip>
 
-                          {/* THAO TÁC THEO TRẠNG THÁI (ICON-ONLY KÈM TOOLTIP) */}
+                          {/* THAO TÁC THEO TRẠNG THÁI (ICON-ONLY KÈM CUSTOM TOP TOOLTIP) */}
                           {order.order_status === 'PENDING' && (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => handleConfirmOrder(order)}
-                                disabled={isProcessing}
-                                title="Duyệt đơn hàng"
-                                className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm shadow-indigo-600/20 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
-                              >
-                                {isProcessing ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                )}
-                              </button>
+                              <Tooltip content="Duyệt đơn hàng">
+                                <button
+                                  type="button"
+                                  onClick={() => handleConfirmOrder(order)}
+                                  disabled={isProcessing}
+                                  className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm shadow-indigo-600/20 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                                >
+                                  {isProcessing ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </Tooltip>
 
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCancelModalOrder(order);
-                                  setCancelReason('Hủy đơn theo yêu cầu của khách hàng');
-                                }}
-                                disabled={isProcessing}
-                                title="Hủy đơn hàng"
-                                className="p-2 rounded-lg border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
-                              >
-                                <Ban className="w-3.5 h-3.5" />
-                              </button>
+                              <Tooltip content="Hủy đơn hàng">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCancelModalOrder(order);
+                                    setCancelReason('Hủy đơn theo yêu cầu của khách hàng');
+                                  }}
+                                  disabled={isProcessing}
+                                  className="p-2 rounded-lg border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                                >
+                                  <Ban className="w-3.5 h-3.5" />
+                                </button>
+                              </Tooltip>
                             </>
                           )}
 
                           {order.order_status === 'CONFIRMED' && (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => openShippingModal(order)}
-                                disabled={isProcessing}
-                                title="Xuất kho giao cho đối tác vận chuyển"
-                                className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm shadow-indigo-600/20 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
-                              >
-                                {isProcessing ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <Truck className="w-3.5 h-3.5" />
-                                )}
-                              </button>
+                              <Tooltip content="Xuất kho giao Shipper">
+                                <button
+                                  type="button"
+                                  onClick={() => openShippingModal(order)}
+                                  disabled={isProcessing}
+                                  className="p-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm shadow-indigo-600/20 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                                >
+                                  {isProcessing ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Truck className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </Tooltip>
 
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setCancelModalOrder(order);
-                                  setCancelReason('Hủy đơn trước khi xuất kho');
-                                }}
-                                disabled={isProcessing}
-                                title="Hủy đơn hàng"
-                                className="p-2 rounded-lg border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
-                              >
-                                <Ban className="w-3.5 h-3.5" />
-                              </button>
+                              <Tooltip content="Hủy đơn hàng">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCancelModalOrder(order);
+                                    setCancelReason('Hủy đơn trước khi xuất kho');
+                                  }}
+                                  disabled={isProcessing}
+                                  className="p-2 rounded-lg border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                                >
+                                  <Ban className="w-3.5 h-3.5" />
+                                </button>
+                              </Tooltip>
                             </>
                           )}
 
                           {order.order_status === 'SHIPPING' && (
                             <>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setLocationModalOrder(order);
-                                  setNewLocation('Bưu cục phát quận trung tâm');
-                                  setNewLocationNote(
-                                    'Kiện hàng đã tới bưu cục phát, shipper đang chuẩn bị giao'
-                                  );
-                                }}
-                                disabled={isProcessing}
-                                title="Quét trạm bưu cục trung chuyển"
-                                className="p-2 rounded-lg border border-sky-500/30 hover:bg-sky-500/10 text-sky-300 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
-                              >
-                                <MapPin className="w-3.5 h-3.5" />
-                              </button>
+                              <Tooltip content="Quét trạm trung chuyển">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setLocationModalOrder(order);
+                                    setNewLocation('Bưu cục phát quận trung tâm');
+                                    setNewLocationNote(
+                                      'Kiện hàng đã tới bưu cục phát, shipper đang chuẩn bị giao'
+                                    );
+                                  }}
+                                  disabled={isProcessing}
+                                  className="p-2 rounded-lg border border-sky-500/30 hover:bg-sky-500/10 text-sky-300 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                                >
+                                  <MapPin className="w-3.5 h-3.5" />
+                                </button>
+                              </Tooltip>
 
-                              <button
-                                type="button"
-                                onClick={() => handleDelivered(order)}
-                                disabled={isProcessing}
-                                title="Xác nhận giao hàng thành công"
-                                className="p-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-sm shadow-emerald-600/20 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
-                              >
-                                {isProcessing ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                )}
-                              </button>
+                              <Tooltip content="Xác nhận giao thành công">
+                                <button
+                                  type="button"
+                                  onClick={() => handleDelivered(order)}
+                                  disabled={isProcessing}
+                                  className="p-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-all shadow-sm shadow-emerald-600/20 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                                >
+                                  {isProcessing ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                  )}
+                                </button>
+                              </Tooltip>
                             </>
                           )}
                         </div>
