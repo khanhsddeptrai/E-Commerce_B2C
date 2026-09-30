@@ -10,7 +10,8 @@
     "proto:generate": "turbo run proto:generate",
     "db:generate": "pnpm --filter @repo/database db:generate:all",
     "db:studio": "pnpm --filter @repo/database db:studio",
-    "db:seed:admin": "pnpm --filter @repo/database db:auth:seed-admin"
+    "db:seed:admin": "pnpm --filter @repo/database db:auth:seed-admin",
+    "typecheck": "turbo run typecheck"
   },
   "devDependencies": {
     "turbo": "^2.1.0"

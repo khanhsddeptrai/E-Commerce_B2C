@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm turbo run typecheck:*)",
+      "Bash(pnpm turbo run lint:*)",
+      "Bash(pnpm turbo run build:*)",
+      "Bash(pnpm --filter * typecheck:*)",
+      "Bash(pnpm --filter * lint:*)",
+      "Bash(pnpm --filter * build:*)",
+      "Bash(pnpm db:generate:*)",
+      "Bash(npx tsc --noEmit:*)",
+      "Bash(npx prisma generate:*)",
+      "Bash(npx prisma validate:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(docker compose logs:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd typecheck:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd turbo run typecheck:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd turbo run lint:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd --filter * typecheck:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd --filter * lint:*)",
+      "PowerShell(git status:*)",
+      "PowerShell(git diff:*)",
+      "PowerShell(git log:*)"
+    ],
+    "ask": [
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(npx prisma migrate:*)",
+      "Bash(pnpm --filter @repo/database db:*migrate:*)",
+      "Bash(docker compose down:*)",
+      "PowerShell(git commit:*)",
+      "PowerShell(git push:*)",
+      "PowerShell(docker compose down:*)"
+    ],
+    "deny": [
+      "Bash(npx prisma migrate reset:*)",
+      "Bash(docker compose down -v:*)",
+      "PowerShell(docker compose down -v:*)"
+    ]
+  }
+}
