@@ -22,7 +22,8 @@
   - [x] Thiết lập `product_db`: Tạo bảng Danh mục, Thương hiệu, Sản phẩm và SKU biến thể.
   - [x] Xây dựng **Product Service**: gRPC Microservice (:50052) nạp dữ liệu, danh mục và biến thể SKU.
   - [ ] Tích hợp **Meilisearch Worker**: Lắng nghe sự kiện từ RabbitMQ để đánh chỉ mục (Index) tìm kiếm.
-  - [x] Thiết lập `packages/tailwind-config` & `packages/ui` (Button, Input, ProductCard, Skeleton).
+  - [ ] Thiết lập `packages/tailwind-config` & `packages/ui` (Button, Input, ProductCard, Skeleton).
+    - *Hiện trạng: chưa tách package dùng chung; component nằm trong `apps/storefront/src/components/`, màu sắc dùng trực tiếp class Tailwind mặc định theo `docs/04`.*
   - [x] Xây dựng **Storefront App (Next.js - apps/storefront)**:
     - [x] Trang chủ NovaTech (Hero Flagship LDAC, Flash Sale đếm ngược, Danh mục).
     - [x] Trang danh mục sản phẩm (Bộ lọc giá/danh mục, tìm kiếm, phân loại).
@@ -53,19 +54,21 @@
     - [x] Tích hợp cổng thanh toán trực tuyến **VNPAY Sandbox** (chuẩn hóa URLSearchParams, IPv4, mã băm HMAC-SHA512 và xác thực thẻ nội địa NCB).
     - [x] Xử lý Idempotency, xác thực Return URL và Webhook/IPN theo chuẩn VNPAY.
   - [x] Hoàn thiện **SAGA Orchestrator giữa Payment Service & Order Service**:
+    - *Hiện trạng: SAGA đang chạy bằng **gRPC đồng bộ** (Payment Service gọi trực tiếp `ProcessPaymentSuccess` / `ProcessPaymentFailed` sang Order Service), chưa đi qua RabbitMQ như mô tả trong `docs/01` và `docs/03`.*
     - [x] Thanh toán thành công (`ProcessPaymentSuccess`) $\rightarrow$ Chốt đơn `CONFIRMED`, `paymentStatus = PAID` $\rightarrow$ Chuyển giữ kho từ `HOLD` $\rightarrow$ `COMMITTED` vĩnh viễn.
     - [x] Thanh toán thất bại / Khách hủy giao dịch (`ProcessPaymentFailed`) $\rightarrow$ Kích hoạt bù trừ (Compensating Transaction) tức thì $\rightarrow$ Chuyển đơn `CANCELLED`, nhả tồn kho Redis (`INCRBY stock:{skuId}`) và chuyển giữ kho sang `RELEASED`.
   - [x] Tích hợp luồng thanh toán tại **Storefront**:
     - [x] Tự động sinh liên kết và điều hướng sang VNPAY Sandbox từ trang Checkout.
     - [x] Trang tiếp nhận và đối soát kết quả giao dịch `/checkout/payment-result` với đầy đủ trạng thái Thành công / Thất bại.
   - [ ] Áp dụng **Transactional Outbox Pattern**: Ngăn chặn tình trạng Dual-Write thất thoát sự kiện.
-  - [ ] Xây dựng **Hệ Thống Giả Lập Vận Chuyển (Mock Logistics Simulator - Cách 2)**:
-    - **Tầng Dịch Vụ Khách Hàng (Storefront Checkout)**: Cho phép khách chọn gói cước *Giao Tiêu Chuẩn (2-4 ngày)* hoặc *Giao Hỏa Tốc (24h)* thay vì phải chọn từng hãng vận chuyển cụ thể.
-    - **Bộ Phân Luồng Thông Minh (Smart Routing Logic)**: Backend tự động map gói cước với đối tác phù hợp (Standard $\rightarrow$ GHN/Viettel Post, Express $\rightarrow$ GHTK/AhaMove) và sinh mã vận đơn chuẩn định dạng (VD: `GHN-VN-8492019`).
+  - [ ] Xây dựng **Hệ Thống Giả Lập Vận Chuyển (Mock Logistics Simulator - Cách 2)** *(đã làm một phần)*:
+    - [ ] **Tầng Dịch Vụ Khách Hàng (Storefront Checkout)**: Cho phép khách chọn gói cước *Giao Tiêu Chuẩn (2-4 ngày)* hoặc *Giao Hỏa Tốc (24h)* thay vì phải chọn từng hãng vận chuyển cụ thể.
+    - [ ] **Bộ Phân Luồng Thông Minh (Smart Routing Logic)**: Backend tự động map gói cước với đối tác phù hợp (Standard $\rightarrow$ GHN/Viettel Post, Express $\rightarrow$ GHTK/AhaMove) và sinh mã vận đơn chuẩn định dạng (VD: `GHN-VN-8492019`).
+      - *Hiện trạng: Admin chọn hãng và sinh mã vận đơn thủ công trên trang `/admin/orders`.*
     - **Cơ Chế Giả Lập Webhook & Timeline (Mock Carrier Webhook & Auto Simulator)**:
-      - Endpoint giả lập Webhook từ hãng giao vận (`POST /api/v1/mock/carrier/update-status`) cho phép Dev/Admin mô phỏng các sự kiện: `PICKED_UP` $\rightarrow$ `IN_TRANSIT` $\rightarrow$ `OUT_FOR_DELIVERY` $\rightarrow$ `DELIVERED`.
-      - Tự động cập nhật `payment_status = PAID` khi đơn COD được giao thành công (`DELIVERED`).
-      - Hỗ trợ chế độ Auto-Timeline Simulator (tự động nhảy trạng thái sau mỗi khoảng thời gian định sẵn để demo/kiểm thử).
+      - [x] Endpoint Webhook từ hãng giao vận `POST /api/v1/orders/webhook/carrier` (map `PICKED_UP`/`IN_TRANSIT` $\rightarrow$ `SHIPPING`, `DELIVERED` $\rightarrow$ `DELIVERED`, `FAILED`/`RETURNED` $\rightarrow$ `CANCELLED`) và API Admin `PATCH /api/v1/orders/:id/delivery-status` cập nhật trạng thái kèm hãng vận chuyển, mã vận đơn.
+      - [x] Tự động cập nhật `payment_status = PAID` khi đơn COD được giao thành công (`DELIVERED`).
+      - [ ] Hỗ trợ chế độ Auto-Timeline Simulator (tự động nhảy trạng thái sau mỗi khoảng thời gian định sẵn để demo/kiểm thử).
     - [x] **Giao Diện Theo Dõi Đơn Hàng (Order Tracking Timeline UI)**: Hiển thị tiến trình đơn hàng trực quan 5 bước cho khách hàng trên Storefront (`/orders/[orderCode]`).
   - [x] Xây dựng **Hệ Thống Xác Thực & Quản Lý Tài Khoản Khách Hàng (Storefront Auth & Account)**:
     - [x] Tầng dịch vụ `authService` và `AuthContext` tích hợp API Gateway (:8000) & JWT Auth Service (:50051).
@@ -87,10 +90,14 @@
     - **Quy trình Nhập kho (Inbound)**: Tạo phiếu nhập hàng mới $\rightarrow$ cập nhật tồn kho vật lý `product_skus.stock_quantity` $\rightarrow$ tự động tăng tồn khả dụng trên Redis Cache (`INCRBY stock:{skuId}`).
     - **Quy trình Xuất kho (Outbound & Order Fulfillment)**: Thủ kho bấm *"Xác nhận xuất kho đóng gói giao Shipper"* $\rightarrow$ trừ tồn kho vật lý thực tế trong CSDL và ghi nhận giao dịch theo mã đơn hàng.
     - **Quy trình Kiểm kê & Hàng hoàn (Stock Adjustment & Returns)**: Xử lý hàng hư hỏng, xuất hủy hoặc nhập lại kho khi shipper hoàn đơn giao không thành công.
-  - [ ] Xây dựng **Admin Dashboard (Next.js + Shadcn UI - `apps/admin`)**:
-    - Quản lý sản phẩm, danh mục, thương hiệu, biến thể SKU và thông số kỹ thuật (TanStack Table).
-    - Phân hệ Quản lý Kho: Tra cứu tồn thực tế vs tồn bán được, tạo phiếu nhập kho, xuất báo cáo xuất-nhập-tồn.
-    - Phân hệ Quản lý Đơn hàng: Xem chi tiết đơn hàng, duyệt đơn, xuất kho và công cụ kích hoạt giả lập Webhook vận chuyển (Mock Carrier Trigger).
+  - [ ] Xây dựng **Admin Dashboard** *(đã làm một phần)*:
+    - *Hiện trạng: Admin đang nằm trong `apps/storefront/src/app/admin` (Next.js + Tailwind, chưa dùng Shadcn UI / TanStack Table), chưa tách thành `apps/admin`.*
+    - [x] Bảo vệ truy cập theo vai trò (RBAC): chặn người chưa đăng nhập và tài khoản không phải `ADMIN` ở `admin/layout.tsx` lẫn API Gateway.
+    - [x] Phân hệ Quản lý Sản phẩm (`/admin/products`): danh sách có lọc/tìm kiếm/phân trang, tạo/sửa sản phẩm kèm biến thể SKU và thông số, đổi trạng thái `PUBLISHED`/`ARCHIVED`, cập nhật tồn kho SKU, tải ảnh sản phẩm.
+    - [ ] Quản lý danh mục và thương hiệu (hiện mới có API đọc `GET /categories`, `GET /brands`).
+    - [ ] Phân hệ Quản lý Kho: Tra cứu tồn thực tế vs tồn bán được, tạo phiếu nhập kho, xuất báo cáo xuất-nhập-tồn.
+    - [x] Phân hệ Quản lý Đơn hàng (`/admin/orders`): danh sách và chi tiết đơn hàng, cập nhật trạng thái vận chuyển kèm hãng và mã vận đơn, trục thời gian lịch sử trạng thái.
+    - [ ] Duyệt đơn, xác nhận xuất kho và công cụ kích hoạt giả lập Webhook vận chuyển (Mock Carrier Trigger) trên giao diện.
 
 ---
 
