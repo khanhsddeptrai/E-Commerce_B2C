@@ -6,6 +6,7 @@ import {
   ApiCategoryDto,
   ApiProductSkuDto,
   Brand,
+  AdminProductStats,
   CreateProductInput,
   UpdateProductInput,
 } from "@/types/ecommerce";
@@ -224,6 +225,32 @@ export const productService = {
       console.error('[productService.getAdminProducts] Error:', err);
     }
     return { products: [], total: 0, page: 1, limit: 20 };
+  },
+
+  async getAdminProductStats(): Promise<AdminProductStats | null> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/admin/products/stats`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+      });
+
+      if (res.ok) {
+        const data: { total: number; published: number; draft: number; archived: number; low_stock: number } =
+          await res.json();
+        return {
+          total: data.total ?? 0,
+          published: data.published ?? 0,
+          draft: data.draft ?? 0,
+          archived: data.archived ?? 0,
+          lowStock: data.low_stock ?? 0,
+        };
+      }
+    } catch (err: unknown) {
+      console.error('[productService.getAdminProductStats] Error:', err);
+    }
+    return null;
   },
 
   async getBrands(): Promise<Brand[]> {

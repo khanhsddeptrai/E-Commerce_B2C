@@ -46,6 +46,14 @@ export interface Brand {
   logo_url?: string;
 }
 
+export interface AdminProductStats {
+  total: number;
+  published: number;
+  draft: number;
+  archived: number;
+  lowStock: number;
+}
+
 export interface CreateProductInput {
   name: string;
   slug?: string;

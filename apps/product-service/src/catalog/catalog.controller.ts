@@ -10,6 +10,7 @@ import {
   GetCategoriesResponse,
   GetAdminProductsRequest,
   GetAdminProductsResponse,
+  GetAdminProductStatsResponse,
   CreateProductRequest,
   UpdateProductRequest,
   UpdateProductStatusRequest,
@@ -42,6 +43,11 @@ export class CatalogController {
   @GrpcMethod('ProductService', 'GetAdminProducts')
   async getAdminProducts(data: GetAdminProductsRequest): Promise<GetAdminProductsResponse> {
     return this.catalogService.getAdminProducts(data);
+  }
+
+  @GrpcMethod('ProductService', 'GetAdminProductStats')
+  async getAdminProductStats(): Promise<GetAdminProductStatsResponse> {
+    return this.catalogService.getAdminProductStats();
   }
 
   @GrpcMethod('ProductService', 'GetBrands')

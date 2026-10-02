@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Boxes,
   Package,
@@ -26,7 +26,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { productService } from '@/services/productService';
-import { Product, Category, Brand, CreateProductInput, UpdateProductInput } from '@/types/ecommerce';
+import { Product, Category, Brand, AdminProductStats, CreateProductInput, UpdateProductInput } from '@/types/ecommerce';
 import { Tooltip } from '@/components/Tooltip';
 import { ResizableDrawer } from '@/components/ResizableDrawer';
 
@@ -54,8 +54,14 @@ export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [totalItems, setTotalItems] = useState(0);
+  const [stats, setStats] = useState<AdminProductStats>({ total: 0, published: 0, draft: 0, archived: 0, lowStock: 0 });
+  // Khóa của truy vấn đã nạp xong; khác truy vấn hiện tại nghĩa là đang tải
+  const [loadedQueryKey, setLoadedQueryKey] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const productsRequestRef = useRef(0);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [feedbackMessage, setFeedbackMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
@@ -98,29 +104,92 @@ export default function AdminProductsPage() {
   const [skuStockEdits, setSkuStockEdits] = useState<{ [skuId: string]: { stock: number; price: number } }>({});
   const [isSavingStock, setIsSavingStock] = useState(false);
 
-  // Nạp dữ liệu sản phẩm, danh mục, thương hiệu
-  const fetchData = async () => {
-    setIsLoading(true);
+  // Nạp danh mục, thương hiệu (dùng cho bộ lọc và form) một lần khi vào trang
+  useEffect(() => {
+    Promise.all([productService.getCategories(), productService.getBrands()])
+      .then(([catRes, brandRes]) => {
+        setCategories(catRes || []);
+        setBrands(brandRes || []);
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to fetch categories/brands:', err);
+      });
+  }, []);
+
+  // Debounce ô tìm kiếm để không gọi API theo từng phím gõ; đổi từ khóa thì về trang 1
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const queryKey = JSON.stringify([currentPage, pageSize, statusFilter, categoryFilter, debouncedSearch]);
+  const isLoading = loadedQueryKey !== queryKey || isRefreshing;
+
+  // Gọi API một trang sản phẩm theo bộ lọc hiện tại (phân trang phía server)
+  const fetchProductsPage = () =>
+    productService.getAdminProducts({
+      page: currentPage,
+      limit: pageSize,
+      status: statusFilter,
+      category: categoryFilter,
+      search: debouncedSearch,
+    });
+
+  // Nạp một trang vào state; bỏ qua response cũ nếu bộ lọc đã đổi trong lúc chờ
+  const loadProducts = (requestId: number, key: string) =>
+    fetchProductsPage().then((res) => {
+      if (requestId !== productsRequestRef.current) return;
+      const total = res.total || 0;
+      setProducts(res.products || []);
+      setTotalItems(total);
+      setLoadedQueryKey(key);
+      // Lùi về trang cuối hợp lệ nếu số bản ghi giảm (vd: đổi trạng thái sản phẩm cuối cùng của trang)
+      const lastPage = Math.max(1, Math.ceil(total / pageSize));
+      if (currentPage > lastPage) setCurrentPage(lastPage);
+    });
+
+  const loadStats = () =>
+    productService.getAdminProductStats().then((res) => {
+      if (res) setStats(res);
+    });
+
+  // Làm mới bảng và thống kê (sau khi tạo/sửa/đổi trạng thái); showSpinner=false để nạp ngầm
+  const fetchData = async (showSpinner = true) => {
+    if (showSpinner) setIsRefreshing(true);
     try {
-      const [prodRes, catRes, brandRes] = await Promise.all([
-        productService.getAdminProducts({ limit: 100 }),
-        productService.getCategories(),
-        productService.getBrands(),
-      ]);
-      setProducts(prodRes.products || []);
-      setCategories(catRes || []);
-      setBrands(brandRes || []);
-    } catch (err: unknown) {
-      console.error('Failed to fetch admin products:', err);
-      setFeedbackMessage({ text: 'Lỗi nạp danh sách sản phẩm', type: 'error' });
+      await Promise.all([loadProducts(++productsRequestRef.current, queryKey), loadStats()]);
     } finally {
-      setIsLoading(false);
+      setIsRefreshing(false);
     }
   };
 
   useEffect(() => {
-    fetchData();
+    loadStats();
   }, []);
+
+  useEffect(() => {
+    loadProducts(++productsRequestRef.current, queryKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey]);
+
+  // Đổi bộ lọc hoặc số dòng/trang thì quay về trang 1
+  const changeStatusFilter = (value: StatusFilter) => {
+    setStatusFilter(value);
+    setCurrentPage(1);
+  };
+
+  const changeCategoryFilter = (value: string) => {
+    setCategoryFilter(value);
+    setCurrentPage(1);
+  };
+
+  const changePageSize = (value: number) => {
+    setPageSize(value);
+    setCurrentPage(1);
+  };
 
   // Lắng nghe phím ESC để đóng Drawer
   useEffect(() => {
@@ -134,46 +203,7 @@ export default function AdminProductsPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [drawerOpen, stockModalProduct]);
 
-  // Bộ lọc sản phẩm
-  const filteredProducts = useMemo(() => {
-    return products.filter((p) => {
-      if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
-      if (categoryFilter !== 'all' && p.categoryId !== categoryFilter) return false;
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchName = p.name.toLowerCase().includes(q);
-        const matchSlug = p.slug.toLowerCase().includes(q);
-        const matchBrand = p.brand.toLowerCase().includes(q);
-        const matchSku = p.variants.some((v) => v.sku.toLowerCase().includes(q));
-        if (!matchName && !matchSlug && !matchBrand && !matchSku) return false;
-      }
-      return true;
-    });
-  }, [products, statusFilter, categoryFilter, searchQuery]);
-
-  // Reset về trang 1 khi thay đổi bộ lọc hoặc số dòng/trang
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [statusFilter, categoryFilter, searchQuery, pageSize]);
-
-  const totalItems = filteredProducts.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const paginatedProducts = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    return filteredProducts.slice(startIndex, startIndex + pageSize);
-  }, [filteredProducts, currentPage, pageSize]);
-
-  // Thống kê nhanh
-  const stats = useMemo(() => {
-    const total = products.length;
-    const published = products.filter((p) => p.status === 'PUBLISHED').length;
-    const draft = products.filter((p) => p.status === 'DRAFT').length;
-    const lowStock = products.filter((p) => {
-      const totalStock = p.variants.reduce((sum, v) => sum + v.stock, 0);
-      return totalStock <= 5;
-    }).length;
-    return { total, published, draft, lowStock };
-  }, [products]);
 
   // Mở Drawer tạo mới
   const handleOpenCreateDrawer = () => {
@@ -253,7 +283,8 @@ export default function AdminProductsPage() {
     try {
       const res = await productService.updateProductStatus(prod.id, nextStatus);
       if (res.success && res.product) {
-        setProducts((prev) => prev.map((p) => (p.id === prod.id ? res.product! : p)));
+        // Nạp lại ngầm: sản phẩm có thể không còn khớp bộ lọc trạng thái, và thống kê thay đổi
+        await fetchData(false);
         setFeedbackMessage({
           text: `Đã đổi trạng thái sản phẩm sang ${nextStatus === 'PUBLISHED' ? 'Đang bán' : 'Lưu kho'}`,
           type: 'success',
@@ -512,7 +543,7 @@ export default function AdminProductsPage() {
             ).map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setStatusFilter(tab.id)}
+                onClick={() => changeStatusFilter(tab.id)}
                 className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   statusFilter === tab.id
                     ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
@@ -525,7 +556,7 @@ export default function AdminProductsPage() {
           </div>
 
           <button
-            onClick={fetchData}
+            onClick={() => fetchData()}
             disabled={isLoading}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
           >
@@ -550,7 +581,7 @@ export default function AdminProductsPage() {
           <div className="sm:w-64">
             <select
               value={categoryFilter}
-              onChange={(e) => setCategoryFilter(e.target.value)}
+              onChange={(e) => changeCategoryFilter(e.target.value)}
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-300 focus:outline-hidden focus:border-indigo-500 transition-colors cursor-pointer"
             >
               <option value="all">Tất cả danh mục</option>
@@ -587,7 +618,7 @@ export default function AdminProductsPage() {
                     <p className="text-xs font-medium">Đang tải dữ liệu sản phẩm...</p>
                   </td>
                 </tr>
-              ) : filteredProducts.length === 0 ? (
+              ) : products.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-16 text-center text-slate-500">
                     <Package className="w-10 h-10 mx-auto text-slate-600 mb-2" />
@@ -595,7 +626,7 @@ export default function AdminProductsPage() {
                   </td>
                 </tr>
               ) : (
-                paginatedProducts.map((p) => {
+                products.map((p) => {
                   const isExpanded = expandedProductIds.includes(p.id);
                   const totalStock = p.variants.reduce((sum, v) => sum + v.stock, 0);
 
@@ -863,7 +894,7 @@ export default function AdminProductsPage() {
                 <span>Số dòng:</span>
                 <select
                   value={pageSize}
-                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  onChange={(e) => changePageSize(Number(e.target.value))}
                   className="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-xs text-white focus:outline-hidden focus:border-indigo-500 cursor-pointer"
                 >
                   <option value={5}>5 / trang</option>

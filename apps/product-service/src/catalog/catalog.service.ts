@@ -15,6 +15,7 @@ import {
   ProductSkuDto,
   GetAdminProductsRequest,
   GetAdminProductsResponse,
+  GetAdminProductStatsResponse,
   CreateProductRequest,
   UpdateProductRequest,
   UpdateProductStatusRequest,
@@ -242,26 +243,37 @@ export class CatalogService implements OnModuleDestroy {
     const skip = (page - 1) * limit;
 
     const where: ProductPrisma.Prisma.ProductWhereInput = {};
+    // Gom các điều kiện OR vào AND để lọc danh mục và tìm kiếm không ghi đè lẫn nhau
+    const conditions: ProductPrisma.Prisma.ProductWhereInput[] = [];
 
     if (data.status && data.status !== 'ALL') {
       where.status = data.status as ProductPrisma.ProductStatus;
     }
 
     if (data.category_id && data.category_id !== 'all') {
-      where.OR = [
-        { categoryId: data.category_id },
-        { category: { slug: data.category_id } },
-      ];
+      conditions.push({
+        OR: [
+          { categoryId: data.category_id },
+          { category: { slug: data.category_id } },
+        ],
+      });
     }
 
     if (data.search_query && data.search_query.trim()) {
       const q = data.search_query.trim();
-      where.OR = [
-        { name: { contains: q, mode: 'insensitive' } },
-        { slug: { contains: q, mode: 'insensitive' } },
-        { tagline: { contains: q, mode: 'insensitive' } },
-        { skus: { some: { skuCode: { contains: q, mode: 'insensitive' } } } },
-      ];
+      conditions.push({
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { slug: { contains: q, mode: 'insensitive' } },
+          { tagline: { contains: q, mode: 'insensitive' } },
+          { brand: { name: { contains: q, mode: 'insensitive' } } },
+          { skus: { some: { skuCode: { contains: q, mode: 'insensitive' } } } },
+        ],
+      });
+    }
+
+    if (conditions.length > 0) {
+      where.AND = conditions;
     }
 
     const [total, products] = await Promise.all([
@@ -289,6 +301,39 @@ export class CatalogService implements OnModuleDestroy {
       total,
       page,
       limit,
+    };
+  }
+
+  async getAdminProductStats(): Promise<GetAdminProductStatsResponse> {
+    const LOW_STOCK_THRESHOLD = 5;
+
+    const [total, published, draft, archived, skus, productIds] = await Promise.all([
+      this.prisma.product.count(),
+      this.prisma.product.count({ where: { status: 'PUBLISHED' } }),
+      this.prisma.product.count({ where: { status: 'DRAFT' } }),
+      this.prisma.product.count({ where: { status: 'ARCHIVED' } }),
+      this.prisma.productSku.findMany(),
+      this.prisma.product.findMany({ select: { id: true } }),
+    ]);
+
+    // Tính tồn theo cùng nguồn với bảng danh sách (Redis, fallback PostgreSQL)
+    const liveStockMap = await this.resolveSkuStocks(skus);
+    const stockByProduct = new Map<string, number>();
+    for (const sku of skus) {
+      const stock = liveStockMap.get(sku.id) ?? sku.stockQuantity;
+      stockByProduct.set(sku.productId, (stockByProduct.get(sku.productId) ?? 0) + stock);
+    }
+
+    const lowStock = productIds.filter(
+      (p) => (stockByProduct.get(p.id) ?? 0) <= LOW_STOCK_THRESHOLD,
+    ).length;
+
+    return {
+      total,
+      published,
+      draft,
+      archived,
+      low_stock: lowStock,
     };
   }
 

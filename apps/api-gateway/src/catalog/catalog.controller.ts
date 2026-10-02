@@ -145,6 +145,24 @@ export class CatalogController implements OnModuleInit {
     return res;
   }
 
+  @Get('admin/products/stats')
+  @UseGuards(JwtAuthGuard)
+  async getAdminProductStats(@Req() req: RequestWithUser) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ có quản trị viên (ADMIN) mới có quyền xem thống kê sản phẩm');
+    }
+
+    const res = await firstValueFrom(this.productServiceClient.getAdminProductStats({}));
+    // proto3 bỏ qua field có giá trị 0 khi serialize, nên điền mặc định
+    return {
+      total: res.total ?? 0,
+      published: res.published ?? 0,
+      draft: res.draft ?? 0,
+      archived: res.archived ?? 0,
+      low_stock: res.low_stock ?? 0,
+    };
+  }
+
   @Post('admin/products')
   @UseGuards(JwtAuthGuard)
   async createProduct(

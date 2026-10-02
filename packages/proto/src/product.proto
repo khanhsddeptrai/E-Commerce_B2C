@@ -7,6 +7,7 @@ service ProductService {
   rpc GetProductBySlug (GetProductBySlugRequest) returns (GetProductBySlugResponse);
   rpc GetCategories (GetCategoriesRequest) returns (GetCategoriesResponse);
   rpc GetAdminProducts (GetAdminProductsRequest) returns (GetAdminProductsResponse);
+  rpc GetAdminProductStats (GetAdminProductStatsRequest) returns (GetAdminProductStatsResponse);
   rpc CreateProduct (CreateProductRequest) returns (ProductDto);
   rpc UpdateProduct (UpdateProductRequest) returns (ProductDto);
   rpc UpdateProductStatus (UpdateProductStatusRequest) returns (ProductDto);
@@ -120,6 +121,16 @@ message GetAdminProductsResponse {
   int32 total = 2;
   int32 page = 3;
   int32 limit = 4;
+}
+
+message GetAdminProductStatsRequest {}
+
+message GetAdminProductStatsResponse {
+  int32 total = 1;
+  int32 published = 2;
+  int32 draft = 3;
+  int32 archived = 4;
+  int32 low_stock = 5;
 }
 
 message GetProductBySlugRequest {

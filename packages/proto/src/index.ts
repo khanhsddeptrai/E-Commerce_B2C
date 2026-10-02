@@ -212,6 +212,16 @@ export interface GetAdminProductsResponse {
   limit: number;
 }
 
+export type GetAdminProductStatsRequest = Record<string, never>;
+
+export interface GetAdminProductStatsResponse {
+  total: number;
+  published: number;
+  draft: number;
+  archived: number;
+  low_stock: number;
+}
+
 export interface GetProductBySlugRequest {
   slug: string;
 }
@@ -298,6 +308,7 @@ export interface ProductServiceClient {
   getProductBySlug(request: GetProductBySlugRequest): Observable<GetProductBySlugResponse>;
   getCategories(request: GetCategoriesRequest): Observable<GetCategoriesResponse>;
   getAdminProducts(request: GetAdminProductsRequest): Observable<GetAdminProductsResponse>;
+  getAdminProductStats(request: GetAdminProductStatsRequest): Observable<GetAdminProductStatsResponse>;
   createProduct(request: CreateProductRequest): Observable<ProductDto>;
   updateProduct(request: UpdateProductRequest): Observable<ProductDto>;
   updateProductStatus(request: UpdateProductStatusRequest): Observable<ProductDto>;
