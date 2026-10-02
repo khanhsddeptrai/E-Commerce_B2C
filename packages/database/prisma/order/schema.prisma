@@ -5,7 +5,7 @@ datasource db {
 
 generator orderClient {
   provider = "prisma-client-js"
-  output   = "../src/generated/order-client"
+  output   = "../../src/generated/order-client"
 }
 
 enum PaymentMethod {
@@ -55,6 +55,7 @@ model Order {
   orderStatus     OrderStatus    @default(PENDING) @map("order_status")
   voucherCode     String?        @map("voucher_code") @db.VarChar(50)
   cancelReason    String?        @map("cancel_reason") @db.Text
+  note            String?        @db.Text
   trackingCode    String?        @map("tracking_code") @db.VarChar(100)
   carrierName     String?        @map("carrier_name") @db.VarChar(100)
   shippingMethod  String         @default("STANDARD") @map("shipping_method") @db.VarChar(50)

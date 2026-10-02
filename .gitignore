@@ -32,6 +32,9 @@ pnpm-debug.log*
 *.sln
 *.sw?
 
+# Database backups (pg_dump)
+backups/
+
 # Temporary and caches
 .turbo/
 .cache/

@@ -10,7 +10,7 @@
 - Package manager: `pnpm` (workspace) + Turborepo.
 - **Kiểm tra sau khi sửa code:** `pnpm turbo run typecheck` (toàn repo) hoặc `pnpm --filter <app> typecheck`.
 - **Test (Jest):** `pnpm turbo run test` hoặc `pnpm --filter <product-service|order-service> test`. Cần Docker đang chạy (Postgres + Redis).
-  - Test đặt ở `apps/<service>/test/**/*.spec.ts`; dùng database `<tên>_test` (tự tạo + `prisma db push`) và Redis DB riêng (product-service: 15, order-service: 14). Helper có guard từ chối chạy trên DB không có hậu tố `_test`.
+  - Test đặt ở `apps/<service>/test/**/*.spec.ts`; dùng database `<tên>_test` (tạo mới mỗi lần chạy + `prisma migrate deploy`) và Redis DB riêng (product-service: 15, order-service: 14). Helper có guard từ chối chạy trên DB không có hậu tố `_test`.
   - Lỗi đã biết nhưng chưa sửa được ghi bằng `test.failing` — khi sửa xong, đổi thành `it` thường.
   - Bắt buộc chạy test khi sửa bất kỳ logic tồn kho / đơn hàng nào.
 - Chạy nhiều service cùng lúc: `pnpm turbo run dev --filter=api-gateway --filter=product-service` (không nối 2 lệnh `pnpm` trên một dòng).
@@ -29,9 +29,9 @@
 - Lỗi gRPC được map sang HTTP qua `apps/api-gateway/src/common/filters/grpc-exception.filter.ts`.
 
 ## Database (Prisma)
-- `packages/database/prisma/` có 4 schema riêng: `schema.prisma` (auth_db), `schema-product.prisma`, `schema-order.prisma`, `schema-payment.prisma`.
-- Generate: `pnpm db:generate` (tất cả) hoặc `pnpm --filter @repo/database db:<product|order|payment>:generate`.
-- Migrate: `db:migrate` / `db:<product|order|payment>:migrate` — hỏi người dùng trước khi chạy migrate.
+- Mỗi database một thư mục riêng: `packages/database/prisma/{auth,product,order,payment}/schema.prisma`, mỗi thư mục có `migrations/` riêng (bắt đầu từ baseline `0_init`). **Không bao giờ để nhiều schema dùng chung một thư mục migrations** — migration của schema này sẽ sinh `DROP TABLE` bảng của schema khác.
+- Generate: `pnpm db:generate` (tất cả) hoặc `pnpm --filter @repo/database db:<auth|product|order|payment>:generate`. Trên Windows phải tắt các service đang chạy trước, nếu không sẽ lỗi `EPERM` do engine bị khóa.
+- Migrate: `db:<auth|product|order|payment>:migrate` (dev), `db:deploy:all` (áp dụng toàn bộ) — hỏi người dùng trước khi chạy migrate trên DB dev.
 - Mỗi service tự nạp `.env` ở root trong `main.ts` trước khi bootstrap.
 
 ## Git & commit

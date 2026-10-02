@@ -112,3 +112,39 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 | `/packages/database/.env` | Dành riêng cho Prisma CLI | `AUTH_DATABASE_URL`, `PRODUCT_DATABASE_URL`, ... |
 | `/apps/auth-service/.env` | Bản sao phục vụ Nest CLI khi chạy cục bộ | `AUTH_DATABASE_URL`, `JWT_ACCESS_SECRET`, `AUTH_GRPC_PORT` |
 | `/apps/api-gateway/.env` | Bản sao phục vụ API Gateway | `PORT_API_GATEWAY`, `AUTH_GRPC_URL`, `JWT_ACCESS_SECRET` |
+
+---
+
+## 4. Sự Cố 3: Migration Của Schema Này Xóa Bảng Của Schema Khác
+
+### Triệu chứng
+- Chạy `prisma migrate dev` cho một schema thì migration mới sinh ra chứa `DROP TABLE` các bảng không liên quan (ví dụ migration của `order` xóa `categories`, `brands`).
+- Chạy `prisma migrate deploy` lên một database trống thì chỉ còn lại bảng của schema được tạo sau cùng.
+
+### Nguyên nhân
+Trước ngày 2026-10-02, cả 4 schema (`auth`, `product`, `order`, `payment`) nằm chung thư mục `packages/database/prisma/` nên **dùng chung một thư mục `migrations/`**. Prisma coi mọi migration trong thư mục là lịch sử của một database duy nhất, nên khi diff schema mới với database, nó sinh lệnh xóa toàn bộ bảng của các schema khác.
+
+### Cách khắc phục (đã áp dụng)
+- Mỗi schema một thư mục riêng: `prisma/{auth,product,order,payment}/schema.prisma`, mỗi thư mục có `migrations/` riêng bắt đầu từ baseline `0_init`.
+- Luôn chạy qua script có `--schema`, ví dụ:
+```bash
+pnpm --filter @repo/database db:product:migrate
+```
+- Áp dụng toàn bộ migrations cho môi trường mới:
+```bash
+pnpm --filter @repo/database db:deploy:all
+```
+- **Không** tạo thêm file `.prisma` nằm chung thư mục với schema khác.
+
+---
+
+## 5. Sự Cố 4: `prisma generate` Báo `EPERM: operation not permitted, rename ... query_engine-windows.dll.node`
+
+### Nguyên nhân
+Trên Windows, các service NestJS đang chạy (`pnpm dev`) giữ khóa file engine của Prisma Client, nên Prisma không ghi đè được file mới.
+
+### Cách khắc phục
+Tắt toàn bộ service đang chạy (đóng các terminal `pnpm dev`), sau đó chạy lại:
+```bash
+pnpm db:generate
+```

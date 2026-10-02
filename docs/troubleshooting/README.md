@@ -30,6 +30,8 @@ docs/troubleshooting/
 | Gọi API trả về `500`, trường `full_name` bị thiếu trong database | `@grpc/proto-loader` đổi `snake_case` sang `camelCase` | [02-grpc-and-protobuf.md](02-grpc-and-protobuf.md) |
 | Sai mật khẩu / trùng email nhưng API Gateway trả về HTTP `500` | Thiếu bộ lọc chuyển đổi mã lỗi gRPC sang REST HTTP | [02-grpc-and-protobuf.md](02-grpc-and-protobuf.md) |
 | `P1012: Environment variable not found: AUTH_DATABASE_URL` | Nest CLI hoặc Prisma CLI không tìm thấy file `.env` | [03-env-and-database.md](03-env-and-database.md) |
+| Migration mới chứa `DROP TABLE` bảng của schema khác | Nhiều schema dùng chung thư mục `migrations/` (đã tách từ 2026-10-02) | [03-env-and-database.md](03-env-and-database.md) |
+| `EPERM: operation not permitted, rename ... query_engine-windows.dll.node` | Service đang chạy khóa file engine Prisma | [03-env-and-database.md](03-env-and-database.md) |
 | Prisma không kết nối được PostgreSQL khi chạy microservice | Thiếu cấu hình URL tường minh hoặc nạp dotenv trễ | [03-env-and-database.md](03-env-and-database.md) |
 | Gõ lệnh chạy 2 service bị lỗi cú pháp hoặc chỉ 1 service chạy | Gõ liên tiếp 2 lệnh `pnpm` trên một dòng terminal | [04-monorepo-and-scripts.md](04-monorepo-and-scripts.md) |
 | `ReferenceError: __dirname is not defined in ES module scope` | Lỗi tương thích CommonJS và ESM trong Node 22+ | [04-monorepo-and-scripts.md](04-monorepo-and-scripts.md) |

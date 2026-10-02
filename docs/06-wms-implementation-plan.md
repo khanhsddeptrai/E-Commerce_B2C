@@ -109,8 +109,17 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - Test tích hợp chạy với Postgres/Redis từ Docker: dùng database `product_db_test` riêng và Redis DB số 15 để không đụng dữ liệu dev.
 - Test Lua giữ kho hiện tại: đủ hàng, thiếu hàng, 2 yêu cầu đồng thời tranh SKU cuối cùng.
 
+### Bước 0.5 — Tách thư mục migrations theo từng database ✅ *(hoàn thành 2026-10-02)*
+- *Kết quả: baseline `0_init` sinh từ trạng thái thực tế của từng DB; `order_db` khôi phục cột `orders.note` (bị xóa nhầm khỏi schema ở commit `abd1902`, còn 24 ghi chú của khách) và thêm migration đặt `shipping_method` NOT NULL. Cả 4 DB dev `up to date`, không lệch schema; migrations của cả 4 schema dựng được database mới từ đầu.*
+- **Vấn đề (phát hiện ở Bước 0):** 4 schema dùng chung `packages/database/prisma/migrations`; mỗi migration mới chứa `DROP TABLE` bảng của schema khác (`init_product_tables` xóa bảng auth, `init_order_db` xóa bảng product, `init_payment_db` xóa bảng order). Chạy `db:product:migrate` lúc này sẽ áp dụng `init_order_db` lên `product_db` và **xóa toàn bộ bảng sản phẩm**; không dựng lại được database từ đầu.
+- Backup 4 database bằng `pg_dump` trước khi làm.
+- Chuyển mỗi schema vào thư mục riêng `prisma/{auth,product,order,payment}/schema.prisma`, mỗi thư mục có `migrations/` riêng; sửa đường dẫn `output` của generator.
+- Tạo migration nền `0_init` cho mỗi schema bằng `prisma migrate diff --from-empty`.
+- Với từng database dev: kiểm tra không lệch schema (`migrate diff --from-url`), xóa lịch sử cũ trong `_prisma_migrations`, `migrate resolve --applied 0_init`. Không đụng dữ liệu bảng nghiệp vụ.
+- Cập nhật script `db:*` trong `packages/database/package.json`, `docs/troubleshooting/03-env-and-database.md`; test chuyển sang `migrate deploy`.
+
 ### Bước 1 — Schema & migration `product_db`
-- Thêm các model ở mục 4 vào `schema-product.prisma`, tạo migration.
+- Thêm các model ở mục 4 vào `prisma/product/schema.prisma`, tạo migration bằng `db:product:migrate`.
 - Script backfill (`prisma/migrate-inventory.js`): tạo kho `HCM-01`; với mỗi SKU tạo `inventory_stocks` từ `stock_quantity` hiện tại + số lượng các đơn đang `CONFIRMED` (đã trừ nhưng chưa xuất); chép reservation `HOLD`/`COMMITTED` còn hiệu lực từ `order_db`; dựng lại Redis.
 - Cập nhật các file seed sản phẩm để tạo tồn qua `inventory_stocks`.
 
