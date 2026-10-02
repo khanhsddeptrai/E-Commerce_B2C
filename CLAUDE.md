@@ -2,6 +2,9 @@
 
 # Ghi chú làm việc cho Claude Code
 
+## Ngôn ngữ
+- **Luôn trả lời người dùng bằng tiếng Việt** (giải thích, báo cáo, câu hỏi, gợi ý commit). Thuật ngữ kỹ thuật, tên file, lệnh và code giữ nguyên tiếng Anh.
+
 ## Môi trường & lệnh
 - Node được quản lý bằng **fnm** (`.nvmrc` = 22). Nếu shell không thấy `node`/`pnpm`, chạy qua: `fnm exec --using=22 -- pnpm.cmd <lệnh>` (trên Windows phải gọi `pnpm.cmd`).
 - Package manager: `pnpm` (workspace) + Turborepo.
