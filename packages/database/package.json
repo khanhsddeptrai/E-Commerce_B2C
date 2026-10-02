@@ -17,7 +17,8 @@
     "db:product:migrate": "prisma migrate dev --schema=prisma/product/schema.prisma",
     "db:product:studio": "prisma studio --schema=prisma/product/schema.prisma",
     "db:product:seed": "node prisma/seed-products.js",
-    "db:product:seed-all": "node prisma/seed-products.js && node prisma/seed-new-items.js && node prisma/seed-aula-variants.js && node prisma/update-aula-images.js",
+    "db:inventory:backfill": "node prisma/backfill-inventory.js",
+    "db:product:seed-all":"node prisma/seed-products.js && node prisma/seed-new-items.js && node prisma/seed-aula-variants.js && node prisma/update-aula-images.js",
     "db:order:generate": "prisma generate --schema=prisma/order/schema.prisma",
     "db:order:migrate": "prisma migrate dev --schema=prisma/order/schema.prisma",
     "db:order:studio": "prisma studio --schema=prisma/order/schema.prisma",
@@ -29,6 +30,8 @@
     "@prisma/client": "^6.4.1"
   },
   "devDependencies": {
+    "dotenv": "^17.4.2",
+    "ioredis": "^6.0.0",
     "prisma": "^6.4.1",
     "typescript": "^5.7.0"
   }

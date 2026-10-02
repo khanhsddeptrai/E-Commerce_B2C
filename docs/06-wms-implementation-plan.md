@@ -118,10 +118,15 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - Với từng database dev: kiểm tra không lệch schema (`migrate diff --from-url`), xóa lịch sử cũ trong `_prisma_migrations`, `migrate resolve --applied 0_init`. Không đụng dữ liệu bảng nghiệp vụ.
 - Cập nhật script `db:*` trong `packages/database/package.json`, `docs/troubleshooting/03-env-and-database.md`; test chuyển sang `migrate deploy`.
 
-### Bước 1 — Schema & migration `product_db`
+### Bước 1 — Schema & migration `product_db` ✅ *(hoàn thành 2026-10-02)*
 - Thêm các model ở mục 4 vào `prisma/product/schema.prisma`, tạo migration bằng `db:product:migrate`.
-- Script backfill (`prisma/migrate-inventory.js`): tạo kho `HCM-01`; với mỗi SKU tạo `inventory_stocks` từ `stock_quantity` hiện tại + số lượng các đơn đang `CONFIRMED` (đã trừ nhưng chưa xuất); chép reservation `HOLD`/`COMMITTED` còn hiệu lực từ `order_db`; dựng lại Redis.
+- Script backfill (`prisma/backfill-inventory.js`): tạo kho `HCM-01`; với mỗi SKU tạo `inventory_stocks` từ `stock_quantity` hiện tại + số lượng các đơn đang `CONFIRMED` (đã trừ nhưng chưa xuất); chép reservation `HOLD`/`COMMITTED` còn hiệu lực từ `order_db`; dựng lại Redis.
 - Cập nhật các file seed sản phẩm để tạo tồn qua `inventory_stocks`.
+- *Kết quả:*
+  - *Migration `add_inventory_tables` (chỉ thêm mới) kèm ràng buộc `CHECK` chống tồn âm ở tầng database; đã áp dụng lên `product_db` dev, các bảng kho đang trống.*
+  - *Script đặt tại `packages/database/prisma/backfill-inventory.js` (`pnpm --filter @repo/database db:inventory:backfill`), idempotent theo từng SKU. Xử lý thêm trường hợp đơn VNPAY được admin xác nhận khi chưa thanh toán (lỗi #4: tồn cũ chưa bị trừ nên không cộng lại).*
+  - *Không sửa file seed: seed vẫn ghi `stock_quantity`, sau đó chạy backfill để khởi tạo tồn cho SKU mới. Seed sẽ chuyển hẳn sang `inventory_stocks` khi xóa cột `stock_quantity` ở Bước 5.*
+  - ***Chưa chạy backfill trên dữ liệu dev** — chỉ chạy lúc chuyển đổi, sau khi Bước 2 + 3 hoàn tất và các service đã dừng (nếu chạy sớm, đơn hàng mới phát sinh theo luồng cũ sẽ làm số liệu lệch).*
 
 ### Bước 2 — Module `inventory` trong Product Service
 - Viết RPC ở mục 5 (proto + interface `packages/proto` + controller + service), worker hết hạn, `ReconcileStock`.

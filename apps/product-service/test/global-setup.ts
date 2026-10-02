@@ -1,7 +1,7 @@
 import { execFileSync } from 'child_process';
 import * as path from 'path';
 import { ProductPrismaClient } from '@repo/database';
-import { assertTestDatabaseName, getTestProductDatabaseUrl } from './test-env';
+import { assertTestDatabaseName, getTestOrderDatabaseUrl, getTestProductDatabaseUrl } from './test-env';
 
 const DATABASE_PACKAGE_DIR = path.resolve(__dirname, '../../../packages/database');
 
@@ -21,18 +21,23 @@ async function recreateTestDatabase(testUrl: string): Promise<void> {
   }
 }
 
-/** Áp dụng chuỗi migrations thật của product_db — kiểm tra luôn migrations dựng được database từ đầu */
-function applyMigrations(testUrl: string): void {
+/** Áp dụng chuỗi migrations thật — kiểm tra luôn migrations dựng được database từ đầu */
+function applyMigrations(schema: 'product' | 'order', envName: string, testUrl: string): void {
   const prismaCli = require.resolve('prisma/build/index.js', { paths: [DATABASE_PACKAGE_DIR] });
-  execFileSync(process.execPath, [prismaCli, 'migrate', 'deploy', '--schema=prisma/product/schema.prisma'], {
+  execFileSync(process.execPath, [prismaCli, 'migrate', 'deploy', `--schema=prisma/${schema}/schema.prisma`], {
     cwd: DATABASE_PACKAGE_DIR,
-    env: { ...process.env, PRODUCT_DATABASE_URL: testUrl },
+    env: { ...process.env, [envName]: testUrl },
     stdio: 'pipe',
   });
 }
 
 export default async function globalSetup(): Promise<void> {
-  const testUrl = getTestProductDatabaseUrl();
-  await recreateTestDatabase(testUrl);
-  applyMigrations(testUrl);
+  const productUrl = getTestProductDatabaseUrl();
+  const orderUrl = getTestOrderDatabaseUrl();
+
+  await recreateTestDatabase(productUrl);
+  applyMigrations('product', 'PRODUCT_DATABASE_URL', productUrl);
+
+  await recreateTestDatabase(orderUrl);
+  applyMigrations('order', 'ORDER_DATABASE_URL', orderUrl);
 }
