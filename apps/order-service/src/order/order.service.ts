@@ -22,7 +22,7 @@ import {
   OrderDto,
 } from '@repo/proto';
 
-const RESERVE_STOCK_LUA = `
+export const RESERVE_STOCK_LUA = `
 local current_stock = tonumber(redis.call('get', KEYS[1]))
 local buy_qty = tonumber(ARGV[1])
 

@@ -11,7 +11,8 @@
     "db:generate": "pnpm --filter @repo/database db:generate:all",
     "db:studio": "pnpm --filter @repo/database db:studio",
     "db:seed:admin": "pnpm --filter @repo/database db:auth:seed-admin",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test"
   },
   "devDependencies": {
     "turbo": "^2.1.0"

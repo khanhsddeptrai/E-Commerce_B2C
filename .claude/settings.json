@@ -25,6 +25,12 @@
       "PowerShell(fnm exec --using=22 -- pnpm.cmd turbo run lint:*)",
       "PowerShell(fnm exec --using=22 -- pnpm.cmd --filter * typecheck:*)",
       "PowerShell(fnm exec --using=22 -- pnpm.cmd --filter * lint:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd test:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd turbo run test:*)",
+      "PowerShell(fnm exec --using=22 -- pnpm.cmd --filter * test:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm turbo run test:*)",
+      "Bash(pnpm --filter * test:*)",
       "PowerShell(git status:*)",
       "PowerShell(git diff:*)",
       "PowerShell(git log:*)"

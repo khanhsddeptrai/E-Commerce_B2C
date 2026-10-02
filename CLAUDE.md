@@ -8,7 +8,11 @@
 ## Môi trường & lệnh
 - Node được quản lý bằng **fnm** (`.nvmrc` = 22). Nếu shell không thấy `node`/`pnpm`, chạy qua: `fnm exec --using=22 -- pnpm.cmd <lệnh>` (trên Windows phải gọi `pnpm.cmd`).
 - Package manager: `pnpm` (workspace) + Turborepo.
-- **Kiểm tra sau khi sửa code:** `pnpm turbo run typecheck` (toàn repo) hoặc `pnpm --filter <app> typecheck`. Dự án chưa có test, nên đây là bước xác minh bắt buộc.
+- **Kiểm tra sau khi sửa code:** `pnpm turbo run typecheck` (toàn repo) hoặc `pnpm --filter <app> typecheck`.
+- **Test (Jest):** `pnpm turbo run test` hoặc `pnpm --filter <product-service|order-service> test`. Cần Docker đang chạy (Postgres + Redis).
+  - Test đặt ở `apps/<service>/test/**/*.spec.ts`; dùng database `<tên>_test` (tự tạo + `prisma db push`) và Redis DB riêng (product-service: 15, order-service: 14). Helper có guard từ chối chạy trên DB không có hậu tố `_test`.
+  - Lỗi đã biết nhưng chưa sửa được ghi bằng `test.failing` — khi sửa xong, đổi thành `it` thường.
+  - Bắt buộc chạy test khi sửa bất kỳ logic tồn kho / đơn hàng nào.
 - Chạy nhiều service cùng lúc: `pnpm turbo run dev --filter=api-gateway --filter=product-service` (không nối 2 lệnh `pnpm` trên một dòng).
 - Hạ tầng: `docker compose -f docker/docker-compose.yml up -d` (Postgres 5432, Redis 6379, RabbitMQ 5672/15672, Mongo 27017, Meilisearch 7700).
 - Gặp lỗi môi trường/cổng/gRPC/Prisma → tra `docs/troubleshooting/` trước.
