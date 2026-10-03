@@ -46,6 +46,7 @@ packages/database/src/generated/
 # Claude Code: junction trỏ tới .agents/skills (tạo lại cục bộ, không commit)
 .claude/skills
 .claude/settings.local.json
+.claude/launch.json
 
 # Redundant sub-package lockfiles
 apps/storefront/pnpm-lock.yaml

@@ -16,6 +16,20 @@ import {
 import { PrismaPaymentService } from '../prisma/prisma-payment.service';
 import { buildVnpayUrl, formatVnpayDate, verifyVnpaySignature } from './vnpay.util';
 
+/** Đọc biến môi trường bắt buộc; thiếu thì dừng service ngay lúc khởi động thay vì dùng giá trị mặc định */
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Thiếu biến môi trường ${name} – cấu hình trong file .env (xem .env.example)`);
+  }
+  return value;
+}
+
+interface VnpayCredentials {
+  tmnCode: string;
+  hashSecret: string;
+}
+
 function parseVnpayDate(dateStr?: string): Date {
   if (!dateStr || dateStr.length !== 14) return new Date();
   const y = parseInt(dateStr.slice(0, 4), 10);
@@ -31,6 +45,7 @@ function parseVnpayDate(dateStr?: string): Date {
 export class PaymentService implements OnModuleInit {
   private readonly logger = new Logger(PaymentService.name);
   private orderServiceClient!: OrderServiceClient;
+  private vnpay!: VnpayCredentials;
 
   constructor(
     private readonly prisma: PrismaPaymentService,
@@ -38,12 +53,14 @@ export class PaymentService implements OnModuleInit {
   ) {}
 
   onModuleInit() {
+    this.vnpay = {
+      tmnCode: requireEnv('VNPAY_TMN_CODE'),
+      hashSecret: requireEnv('VNPAY_HASH_SECRET'),
+    };
     this.orderServiceClient = this.client.getService<OrderServiceClient>('OrderService');
   }
 
   async createPaymentUrl(data: CreatePaymentUrlRequest): Promise<CreatePaymentUrlResponse> {
-    const tmnCode = process.env.VNPAY_TMN_CODE || 'CGXZLS0Z';
-    const secretKey = process.env.VNPAY_HASH_SECRET || 'XNBCJFAKAZQSGTARRLGCHVZWCIOIGSHN';
     const vnpayUrl = process.env.VNPAY_URL || 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html';
     const returnUrl =
       data.return_url ||
@@ -70,7 +87,7 @@ export class PaymentService implements OnModuleInit {
     const vnpParams: Record<string, string | number> = {
       vnp_Version: '2.1.0',
       vnp_Command: 'pay',
-      vnp_TmnCode: tmnCode,
+      vnp_TmnCode: this.vnpay.tmnCode,
       vnp_Locale: 'vn',
       vnp_CurrCode: 'VND',
       vnp_TxnRef: data.order_code,
@@ -86,7 +103,7 @@ export class PaymentService implements OnModuleInit {
       vnpParams['vnp_BankCode'] = data.bank_code;
     }
 
-    const paymentUrl = buildVnpayUrl(vnpParams, secretKey, vnpayUrl);
+    const paymentUrl = buildVnpayUrl(vnpParams, this.vnpay.hashSecret, vnpayUrl);
 
     // Lưu log khởi tạo
     await this.prisma.paymentLog.create({
@@ -106,11 +123,10 @@ export class PaymentService implements OnModuleInit {
   }
 
   async verifyPaymentReturn(data: VerifyPaymentReturnRequest): Promise<VerifyPaymentReturnResponse> {
-    const secretKey = process.env.VNPAY_HASH_SECRET || 'XNBCJFAKAZQSGTARRLGCHVZWCIOIGSHN';
     const searchParams = new URLSearchParams(data.query_string);
     const queryParams: Record<string, string> = Object.fromEntries(searchParams.entries());
 
-    const isValidSignature = verifyVnpaySignature(queryParams, secretKey);
+    const isValidSignature = verifyVnpaySignature(queryParams, this.vnpay.hashSecret);
     const orderCode = queryParams['vnp_TxnRef'] || '';
     const responseCode = queryParams['vnp_ResponseCode'] || '';
     const transactionNo = queryParams['vnp_TransactionNo'] || '';
@@ -266,11 +282,10 @@ export class PaymentService implements OnModuleInit {
   }
 
   async processIpnWebhook(data: ProcessIpnWebhookRequest): Promise<ProcessIpnWebhookResponse> {
-    const secretKey = process.env.VNPAY_HASH_SECRET || 'XNBCJFAKAZQSGTARRLGCHVZWCIOIGSHN';
     const searchParams = new URLSearchParams(data.query_string);
     const queryParams: Record<string, string> = Object.fromEntries(searchParams.entries());
 
-    const isValidSignature = verifyVnpaySignature(queryParams, secretKey);
+    const isValidSignature = verifyVnpaySignature(queryParams, this.vnpay.hashSecret);
     if (!isValidSignature) {
       return { rsp_code: '97', message: 'Invalid Checksum' };
     }
