@@ -2,6 +2,9 @@
 
 # Ghi chú làm việc cho Claude Code
 
+## Công việc đang làm dở
+- **WMS (quản lý kho):** Bước 0–3 đã xong và đã chuyển đổi dữ liệu dev. Việc tiếp theo, trạng thái hiện tại và các lưu ý kỹ thuật nằm ở **`docs/06-wms-implementation-plan.md` mục 8** — đọc mục đó trước khi làm tiếp.
+
 ## Ngôn ngữ
 - **Luôn trả lời người dùng bằng tiếng Việt** (giải thích, báo cáo, câu hỏi, gợi ý commit). Thuật ngữ kỹ thuật, tên file, lệnh và code giữ nguyên tiếng Anh.
 

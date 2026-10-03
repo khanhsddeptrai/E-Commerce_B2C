@@ -178,13 +178,13 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
     - *Kiểm thử end-to-end trên hệ thống dev đang chạy (gateway thật + VNPAY sandbox), SKU `NV-SND-SLV`: đặt COD → bàn giao shipper (sổ kho `OUTBOUND -1`) → giao thành công (COD tự PAID); khách hủy đơn COD đã chốt (trả lại hàng – lỗi #3 đã sửa); đặt quá số còn bán → HTTP 409; VNPAY khách hủy trên trang VNPAY → CANCELLED + nhả hàng; VNPAY thanh toán thành công bằng thẻ test NCB → CONFIRMED + PAID + chốt hàng. Mọi bước khớp số liệu dự kiến, mọi task kho `DONE`, `ReconcileStock` cuối: 36 SKU lệch 0.*
     - *Lỗi có sẵn phát hiện khi kiểm thử: order-service nạp bản `@nestjs/microservices` khác với bản `@nestjs/core` dùng (khác peer `ioredis`) nên `instanceof RpcException` luôn sai → mọi lỗi nghiệp vụ thành "Internal server error" (HTTP 500). Đã sửa bằng `GrpcExceptionFilter` toàn cục (nhận diện theo hình dạng thay vì `instanceof`) đăng ký qua `APP_FILTER`.*
 
-### Bước 4 — API Gateway & giao diện Admin
+### Bước 4 — API Gateway & giao diện Admin ⏳ *(bước tiếp theo – chi tiết ở mục 8)*
 - Endpoint REST cho kho (có phân trang theo quy chuẩn `items/total/page/limit`), chỉ `ADMIN`.
 - Trang `/admin/inventory`: tab Tồn kho (thực tế / đã chốt / đang giữ / bán được), tab Phiếu nhập (tạo + danh sách), tab Sổ xuất nhập tồn (lọc SKU, loại, thời gian).
 - `/admin/orders`: nút "Xác nhận xuất kho" (đơn `CONFIRMED` → `SHIPPING`) và "Nhận hàng hoàn".
 - `/admin/products`: modal sửa nhanh tồn kho → điều chỉnh kiểm kê (nhập chênh lệch + lý do).
 
-### Bước 5 — Tài liệu
+### Bước 5 — Tài liệu & dọn dẹp ⏳ *(chi tiết ở mục 8)*
 - Cập nhật `docs/02-database-design.md`, `docs/01-system-architecture.md`, `docs/05-roadmap.md`, `CLAUDE.md`.
 - Migration dọn dẹp: xóa cột `product_skus.stock_quantity`.
 
@@ -196,3 +196,64 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - Chọn kho xuất cho đơn: giai đoạn này luôn dùng kho mặc định.
 - **Hướng nâng cấp sau — Transactional Outbox + RabbitMQ**: thay `StockSyncWorker` gọi gRPC bằng tiến trình đẩy sự kiện từ `stock_sync_tasks` lên RabbitMQ, Product Service tiêu thụ qua consumer có DLQ. Lợi ích: hai service không cần cùng hoạt động tại một thời điểm. Để thành giai đoạn riêng (gắn với mục Transactional Outbox ở Giai đoạn 4 trong roadmap).
 - Payment Service → Order Service (`ProcessPaymentSuccess`/`Failed`) vẫn là gọi gRPC đồng bộ; trường hợp gọi thất bại đã được VNPAY gửi lại IPN và trang kết quả thanh toán gọi lại, nên ngoài phạm vi kế hoạch này.
+
+## 8. Bàn Giao Cho Phiên Làm Việc Tiếp Theo *(cập nhật 2026-10-03)*
+
+> Đọc mục này là đủ để làm tiếp, không cần lịch sử hội thoại cũ. Luồng đặt hàng đầy đủ xem mục 5.1 + bảng "Thiết kế đã chốt" ở Bước 3.
+
+### 8.1. Trạng thái hiện tại
+- **Bước 0 → 3 đã xong và đã chuyển đổi dữ liệu dev.** WMS đang bật (kho mặc định `HCM-01`). Backfill **đã chạy** — không chạy lại trên dev trừ khi seed thêm SKU mới (script idempotent theo SKU).
+- Tồn kho chỉ do product-service quản lý (`InventoryService`, 12 RPC, package gRPC `inventory`, cổng :50052). Order-service không còn kết nối `product_db` / Redis; mọi thao tác kho sau khi tạo đơn đi qua `stock_sync_tasks` + `StockSyncWorker`.
+- Test: product-service 93, order-service 48 (`pnpm turbo run test`, cần Docker). Kiểm thử end-to-end trên hệ thống thật đã pass 7 kịch bản (xem Bước 3c).
+- **Việc dở dang:** không có code dở dang. Đầu phiên chạy `git status`; nếu còn thay đổi ở `CLAUDE.md` / file này thì đó là phần bàn giao chưa commit (`docs(wms): thêm hướng dẫn bàn giao cho bước 4 và 5`).
+- Dữ liệu test còn lại trên dev: 6 đơn của `admin@novatech.com` có ghi chú "Đơn test tự động WMS"; đơn `ORD-261003-D8Q6` đang CONFIRMED + PAID, giữ (`COMMITTED`) 1 cái `NV-SND-SLV` — dùng được để test nút "Bàn giao shipper" / "Nhận hàng hoàn" ở Bước 4.
+
+### 8.2. Bước 4 — việc cần làm
+**a) API Gateway** (`apps/api-gateway`)
+- Thêm gRPC client `InventoryService` (package `INVENTORY_PACKAGE_NAME`, `INVENTORY_PROTO_PATH`, url `PRODUCT_GRPC_URL`) — làm giống `catalog.module.ts`.
+- Module mới `inventory` với các endpoint (đều `JwtAuthGuard` + kiểm tra `role === 'ADMIN'`):
+  - `GET /api/v1/admin/inventory/stocks?page&limit&search&low_stock_only&low_stock_threshold` → `GetInventoryStocks`
+  - `GET /api/v1/admin/inventory/transactions?page&limit&sku_id&type&ref_id&from&to` → `GetInventoryTransactions`
+  - `GET /api/v1/admin/inventory/receipts?page&limit&search` → `GetReceipts`
+  - `POST /api/v1/admin/inventory/receipts` (supplier_name, note, items[{sku_id, quantity, cost_price}]) → `CreateReceipt`, `created_by = ADMIN_<email>`
+  - `POST /api/v1/admin/inventory/adjustments` (sku_id, quantity_delta ≠ 0, reason bắt buộc) → `AdjustStock`
+  - `POST /api/v1/admin/inventory/reconcile` → `ReconcileStock` (cảnh báo trên UI: chỉ dùng khi ít giao dịch)
+- DTO có `class-validator`; **luôn dùng `?? []` / `?? 0`** khi đọc response gRPC (client Nest chỉ bật `keepCase` nên mảng rỗng / số 0 / false bị bỏ khỏi response).
+- Đã có sẵn: `POST /api/v1/orders/:id/retry-stock-sync`; `PATCH /api/v1/orders/:id/delivery-status` nhận `new_status` ∈ `CONFIRMED | SHIPPING | DELIVERED | CANCELLED | RETURNED`.
+
+**b) Storefront – tầng dữ liệu**
+- Service mới `apps/storefront/src/services/inventoryService.ts` (gọi các endpoint trên, `credentials: 'include'`); kiểu dữ liệu thêm vào `src/types/ecommerce.ts`.
+- `ApiOrderDto` (trong `ecommerce.ts`) thêm `stock_sync_status?: 'OK' | 'PENDING' | 'FAILED'`, `stock_sync_error?`; `orderService.ts` thêm `retryStockSync(orderId)`.
+
+**c) Storefront – giao diện admin** (tuân thủ `AGENTS.md`: thanh phân trang đầy đủ "Hiển thị X - Y trên tổng số Z", `cursor-pointer`, tiêu đề ngắn không icon / subtext, design system `docs/04`; tái sử dụng `ResizableDrawer`, `Tooltip`, `Toast`)
+- Trang mới `apps/storefront/src/app/admin/inventory/page.tsx`, thêm link vào sidebar `apps/storefront/src/app/admin/layout.tsx` (cạnh `/admin/orders`, `/admin/products`):
+  - Tab **Tồn kho**: bảng SKU × kho với on_hand / reserved / held / available, tìm kiếm, lọc "sắp hết hàng", phân trang server; nút "Điều chỉnh" mở drawer nhập chênh lệch + lý do.
+  - Tab **Phiếu nhập**: danh sách phiếu (mã GRN, nhà cung cấp, tổng SL, tổng giá vốn, người tạo, thời gian) + drawer tạo phiếu (chọn nhiều SKU, số lượng, giá vốn).
+  - Tab **Sổ xuất nhập tồn**: lọc theo SKU / loại (INBOUND, OUTBOUND, RETURN, ADJUSTMENT) / mã chứng từ / khoảng thời gian; số lượng âm-dương có màu.
+- `apps/storefront/src/app/admin/orders/page.tsx`:
+  - Badge trạng thái đồng bộ kho (PENDING = đang chờ, FAILED = đỏ kèm `stock_sync_error`) + nút **"Thử lại đồng bộ kho"**.
+  - Nút **"Nhận hàng hoàn"** (`new_status: 'RETURNED'`) cho đơn DELIVERED, hoặc CANCELLED có `shipped_at`.
+  - Thêm trạng thái `RETURNED` vào tab lọc, badge và thống kê; hiển thị thông báo lỗi 409 từ backend (vd chuyển trạng thái không hợp lệ).
+- Trang của khách `apps/storefront/src/app/account/orders/page.tsx` và `apps/storefront/src/app/orders/[orderCode]/page.tsx`: hiển thị trạng thái `RETURNED` ("Đã hoàn hàng").
+- `apps/storefront/src/app/admin/products/page.tsx`: modal "sửa nhanh tồn kho" hiện đặt **tồn thực tế mới** (backend tự ghi phiếu điều chỉnh, từ chối nếu thấp hơn phần đã giữ/chốt) — đổi nhãn cho rõ, hiển thị lỗi 409; cột tồn trong bảng là **số còn bán được**.
+- Theo `AGENTS.md`: **hỏi người dùng trước khi mở trình duyệt để test**.
+
+### 8.3. Bước 5 — việc cần làm
+- Tài liệu: `docs/02-database-design.md` (bảng kho mới, `stock_sync_tasks`, bỏ `inventory_reservations` khỏi order_db), `docs/01-system-architecture.md` (InventoryService, luồng đồng bộ kho), `docs/05-roadmap.md` (tick WMS ở Giai đoạn 5).
+- Dọn dẹp code luồng cũ trong product-service: nhánh "chưa bật WMS" ở `catalog.service.ts` (`createProduct`, `updateSkuStock`, `resolveSkuStocks`), giá trị `null` của `InventoryService.setOnHand / getAvailableStocks`, test `test.failing` lỗi #1 trong `admin-products.spec.ts`.
+- Migration `product_db`: xóa cột `product_skus.stock_quantity`; sửa các file seed (`packages/database/prisma/seed-*.js`) để tạo tồn qua `inventory_stocks` + giao dịch INBOUND tồn đầu kỳ.
+- Migration `order_db`: xóa bảng / model `inventory_reservations` cũ; sau đó script `backfill-inventory.js` hết tác dụng (xóa hoặc ghi rõ chỉ dùng cho lịch sử).
+- Backup DB trước khi chạy migration xóa cột / bảng.
+
+### 8.4. Lưu ý kỹ thuật đã gặp (tránh lặp lại)
+- **Node qua fnm:** shell của agent không có node trên PATH → `fnm exec --using=22 -- pnpm.cmd <lệnh>` (PowerShell) hoặc thêm `/c/Users/LEGION/AppData/Roaming/fnm/node-versions/v22.22.2/installation` vào PATH (Bash).
+- **`prisma generate` lỗi EPERM** khi service đang chạy → nhờ người dùng tắt service trước.
+- **Prisma chặn lệnh phá dữ liệu khi phát hiện AI agent** (`--force-reset`, `migrate reset`): không lách; test tự tạo lại database `_test` bằng SQL.
+- **Git Bash đổi đường dẫn `/tmp`** khi gọi `docker exec` → đặt `MSYS_NO_PATHCONV=1`.
+- **Không dùng `python3`** trên máy này (mở Microsoft Store và treo).
+- **Không `rm` với đường dẫn tương đối** khi backup tạm — để file tạm trong thư mục scratchpad của phiên.
+- **`sed` với ký tự `#` làm phân cách** sẽ hỏng khi nội dung có tiêu đề markdown `###` — dùng Edit thay vì sed cho file markdown.
+- **Order-service nạp bản `@nestjs/microservices` khác `@nestjs/core`** → đã xử lý bằng `GrpcExceptionFilter`; khi thêm service mới cần kiểm tra lại (script so sánh `require.resolve` từ code và từ `@nestjs/core`).
+- **Gateway giới hạn đăng nhập 5 lần / 60 giây** (HTTP 429) → script test phải dùng lại token.
+- **Test end-to-end VNPAY sandbox:** chọn "Thẻ nội địa" → NCB → thẻ test công khai của VNPAY sandbox; hộp thoại "Điều khoản sử dụng" của VNPAY **cần người dùng cho phép** trước khi bấm đồng ý. IPN của VNPAY không gọi được `localhost`, chỉ nhánh trang kết quả (`/checkout/payment-result` → `vnpay-return`) hoạt động trên dev.
+- **Kiểm chứng test tranh chấp đồng thời:** tạm bỏ điều kiện chống trùng, xác nhận test fail ổn định (chạy nhiều vòng), rồi khôi phục — đã làm cho mọi RPC kho, `StockSyncService.claim`, `OrderService.transition`.
