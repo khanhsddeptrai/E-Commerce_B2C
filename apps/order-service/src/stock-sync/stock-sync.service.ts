@@ -76,6 +76,9 @@ export class StockSyncService {
         orderId,
         action,
         performedBy,
+        // Dùng đồng hồ của service (không dùng now() của database): processOrder so sánh với new Date() của service,
+        // nếu đồng hồ database chạy nhanh hơn vài ms thì task vừa ghi bị coi là "chưa đến hạn" và phải chờ worker
+        nextRetryAt: new Date(),
         payload: payload ? (payload as OrderPrisma.Prisma.InputJsonObject) : undefined,
       },
     });
