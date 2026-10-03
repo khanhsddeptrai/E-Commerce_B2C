@@ -210,6 +210,7 @@ message UpdateProductStatusRequest {
 
 message UpdateSkuStockRequest {
   string sku_id = 1;
-  int32 stock_quantity = 2;
+  int32 stock_quantity = 2; // Tồn thực tế mới (khi đã bật WMS: hệ thống tự ghi phiếu điều chỉnh phần chênh lệch)
   optional double price = 3;
+  optional string updated_by = 4;
 }

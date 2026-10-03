@@ -301,6 +301,7 @@ export interface UpdateSkuStockRequest {
   sku_id: string;
   stock_quantity: number;
   price?: number;
+  updated_by?: string;
 }
 
 export interface ProductServiceClient {
@@ -367,6 +368,70 @@ export interface ShipStockRequest {
   performed_by: string;
 }
 
+export interface ReceiveReturnRequest {
+  order_id: string;
+  performed_by: string;
+  items: StockItem[];
+  note: string;
+}
+
+export interface ReceiptItemInput {
+  sku_id: string;
+  quantity: number;
+  cost_price: number;
+}
+
+export interface CreateReceiptRequest {
+  warehouse_id?: string;
+  supplier_name: string;
+  note: string;
+  created_by: string;
+  items: ReceiptItemInput[];
+}
+
+export interface ReceiptItemDto {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  product_name: string;
+  quantity: number;
+  cost_price: number;
+}
+
+export interface ReceiptDto {
+  id: string;
+  code: string;
+  warehouse_id: string;
+  warehouse_code: string;
+  supplier_name: string;
+  note: string;
+  created_by: string;
+  created_at: string;
+  items: ReceiptItemDto[];
+  total_quantity: number;
+  total_cost: number;
+}
+
+export interface AdjustStockRequest {
+  sku_id: string;
+  warehouse_id?: string;
+  quantity_delta: number;
+  reason: string;
+  created_by: string;
+}
+
+export interface InventoryStockDto {
+  sku_id: string;
+  warehouse_id: string;
+  on_hand: number;
+  reserved: number;
+}
+
+export interface AdjustStockResponse {
+  stock: InventoryStockDto;
+  adjustment_code: string;
+}
+
 export type ReservationStatusValue = 'HOLD' | 'COMMITTED' | 'RELEASED' | 'SHIPPED';
 
 export interface ReservationDto {
@@ -389,6 +454,9 @@ export interface InventoryServiceClient {
   commitStock(request: CommitStockRequest): Observable<StockOperationResponse>;
   releaseStock(request: ReleaseStockRequest): Observable<StockOperationResponse>;
   shipStock(request: ShipStockRequest): Observable<StockOperationResponse>;
+  receiveReturn(request: ReceiveReturnRequest): Observable<StockOperationResponse>;
+  createReceipt(request: CreateReceiptRequest): Observable<ReceiptDto>;
+  adjustStock(request: AdjustStockRequest): Observable<AdjustStockResponse>;
 }
 
 export const ORDER_PROTO_PATH = getProtoPath('order.proto');

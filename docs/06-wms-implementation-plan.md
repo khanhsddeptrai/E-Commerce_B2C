@@ -135,7 +135,9 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - `createProduct` khởi tạo tồn ban đầu bằng giao dịch `INBOUND` (ref `OPENING`); `updateProduct` không còn sửa tồn.
 - Chia 3 phần:
   - **2a ✅** *(2026-10-03)* — `inventory.proto` (package `inventory`, `InventoryService` chạy chung cổng :50052) với `GetSkusForOrder`, `HoldStock`, `CommitStock`, `ReleaseStock`, `ShipStock`; Lua giữ hàng nhiều SKU nguyên tử, cộng trả chỉ khi key tồn tại; 32 test gồm tranh chấp đồng thời (đã kiểm chứng test bắt được lỗi khi bỏ điều kiện chống trùng).
-  - **2b** — Nhập kho (phiếu nhập), điều chỉnh kiểm kê, nhận hàng hoàn; `createProduct`/`updateProduct`/`updateSkuStock` chuyển sang mô hình mới.
+  - **2b ✅** *(2026-10-03)* — `CreateReceipt` (mã `GRN-YYMMDD-XXXX`), `AdjustStock` (mã `ADJ-…`, giảm chỉ trong phần còn bán được – kiểm tra nguyên tử trên Redis), `ReceiveReturn` (nhận toàn bộ hoặc một phần); 22 test.
+    - *Giai đoạn chuyển đổi: `createProduct` / `updateSkuStock` có 2 chế độ theo việc đã có kho mặc định hay chưa (chưa chạy backfill → giữ hành vi cũ). Khi đã bật WMS: `createProduct` ghi tồn đầu kỳ, `updateSkuStock` ghi phiếu điều chỉnh phần chênh lệch (sửa lỗi #1) và vẫn đồng bộ cột `stock_quantity` cho tới 2c.*
+    - *`updateProduct` vốn không sửa SKU / tồn nên không cần đổi.*
   - **2c** — API đọc tồn / sổ kho có phân trang, worker nhả giữ hàng hết hạn, `ReconcileStock`; catalog đọc tồn từ `inventory_stocks`.
 
 ### Bước 3 — Refactor Order Service

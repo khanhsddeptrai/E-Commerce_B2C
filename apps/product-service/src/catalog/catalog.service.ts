@@ -3,6 +3,7 @@ import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
 import Redis from 'ioredis';
 import { PrismaProductService } from '../prisma/prisma-product.service';
+import { InventoryService } from '../inventory/inventory.service';
 import { ProductPrisma } from '@repo/database';
 import {
   GetProductsRequest,
@@ -48,7 +49,10 @@ type ProductWithRelations = ProductPrisma.Prisma.ProductGetPayload<{
 export class CatalogService implements OnModuleDestroy {
   private readonly redis: Redis;
 
-  constructor(private readonly prisma: PrismaProductService) {
+  constructor(
+    private readonly prisma: PrismaProductService,
+    private readonly inventory: InventoryService,
+  ) {
     const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
     this.redis = new Redis(redisUrl, {
       maxRetriesPerRequest: 3,
@@ -370,6 +374,8 @@ export class CatalogService implements OnModuleDestroy {
   async createProduct(data: CreateProductRequest): Promise<ProductDto> {
     const rawSlug = data.slug || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
     const slug = `${rawSlug}-${Math.random().toString(36).substring(2, 6)}`;
+    // Đã bật WMS: khởi tạo tồn ban đầu qua inventory_stocks + sổ kho; chưa bật: chỉ ghi stock_quantity (luồng cũ)
+    const warehouseId = await this.inventory.findDefaultWarehouseId();
 
     const created = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -424,6 +430,16 @@ export class CatalogService implements OnModuleDestroy {
           specs: { orderBy: { displayOrder: 'asc' } },
         },
       });
+
+      if (warehouseId) {
+        await this.inventory.initializeSkuStocks(
+          tx,
+          warehouseId,
+          product.skus.map((s) => ({ id: s.id, quantity: s.stockQuantity })),
+          `PRODUCT:${product.id}`,
+          'ADMIN',
+        );
+      }
 
       return product;
     });
@@ -527,8 +543,17 @@ export class CatalogService implements OnModuleDestroy {
   }
 
   async updateSkuStock(data: UpdateSkuStockRequest): Promise<ProductSkuDto> {
+    // Đã bật WMS: đặt tồn thực tế mới bằng phiếu điều chỉnh phần chênh lệch (không ghi đè Redis → không mất phần đang giữ)
+    const wmsStock = await this.inventory.setOnHand(
+      data.sku_id,
+      data.stock_quantity,
+      data.updated_by || 'ADMIN',
+      'Admin cập nhật nhanh tồn kho',
+    );
+
     const updateData: ProductPrisma.Prisma.ProductSkuUpdateInput = {
-      stockQuantity: data.stock_quantity,
+      // Giữ cột cũ đồng bộ với tồn thực tế cho tới khi catalog chuyển hẳn sang đọc inventory_stocks
+      stockQuantity: wmsStock ? wmsStock.on_hand : data.stock_quantity,
     };
     if (data.price !== undefined && data.price !== null) {
       updateData.price = data.price;
@@ -539,7 +564,10 @@ export class CatalogService implements OnModuleDestroy {
       data: updateData,
     });
 
-    await this.redis.set(`stock:${sku.id}`, sku.stockQuantity);
+    if (!wmsStock) {
+      // Luồng cũ (chưa bật WMS) – lỗi #1: ghi đè Redis, sẽ bỏ khi chuyển đổi xong
+      await this.redis.set(`stock:${sku.id}`, sku.stockQuantity);
+    }
 
     return {
       id: sku.id,

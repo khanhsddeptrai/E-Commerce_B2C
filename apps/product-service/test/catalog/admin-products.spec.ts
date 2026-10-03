@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import { CatalogService } from '../../src/catalog/catalog.service';
+import { InventoryService } from '../../src/inventory/inventory.service';
 import { PrismaProductService } from '../../src/prisma/prisma-product.service';
 import {
   createBrand,
@@ -14,12 +15,14 @@ describe('CatalogService – quản trị sản phẩm', () => {
   let prisma: PrismaProductService;
   let redis: Redis;
   let service: CatalogService;
+  let inventory: InventoryService;
 
   beforeAll(async () => {
     prisma = new PrismaProductService();
     await prisma.$connect();
     redis = createTestRedis();
-    service = new CatalogService(prisma);
+    inventory = new InventoryService(prisma);
+    service = new CatalogService(prisma, inventory);
   });
 
   beforeEach(async () => {
@@ -29,6 +32,7 @@ describe('CatalogService – quản trị sản phẩm', () => {
 
   afterAll(async () => {
     service.onModuleDestroy();
+    inventory.onModuleDestroy();
     redis.disconnect();
     await prisma.$disconnect();
   });
@@ -114,7 +118,7 @@ describe('CatalogService – quản trị sản phẩm', () => {
     });
   });
 
-  describe('updateSkuStock (hành vi hiện tại – sẽ thay thế ở Bước 2)', () => {
+  describe('updateSkuStock khi chưa bật WMS (luồng cũ – bỏ sau khi chuyển đổi)', () => {
     // Lỗi #1 trong docs/06-wms-implementation-plan.md: ghi đè Redis bằng tồn DB, cộng nhầm phần đang giữ hàng.
     // Dùng test.failing để ghi nhận lỗi; khi lỗi được sửa, test này sẽ báo để chuyển thành test thường.
     test.failing('không làm mất phần tồn đang giữ chờ thanh toán khi admin sửa tồn', async () => {

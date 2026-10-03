@@ -276,6 +276,7 @@ export class CatalogController implements OnModuleInit {
         sku_id: skuId,
         stock_quantity: dto.stock_quantity,
         price: dto.price,
+        updated_by: `ADMIN_${req.user.email}`,
       }),
     );
     return res;

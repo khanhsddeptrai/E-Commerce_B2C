@@ -1,6 +1,11 @@
 import { Controller } from '@nestjs/common';
 import { GrpcMethod } from '@nestjs/microservices';
 import {
+  AdjustStockRequest,
+  AdjustStockResponse,
+  CreateReceiptRequest,
+  ReceiptDto,
+  ReceiveReturnRequest,
   CommitStockRequest,
   GetSkusForOrderRequest,
   GetSkusForOrderResponse,
@@ -38,5 +43,20 @@ export class InventoryController {
   @GrpcMethod('InventoryService', 'ShipStock')
   async shipStock(data: ShipStockRequest): Promise<StockOperationResponse> {
     return this.inventoryService.shipStock(data);
+  }
+
+  @GrpcMethod('InventoryService', 'ReceiveReturn')
+  async receiveReturn(data: ReceiveReturnRequest): Promise<StockOperationResponse> {
+    return this.inventoryService.receiveReturn(data);
+  }
+
+  @GrpcMethod('InventoryService', 'CreateReceipt')
+  async createReceipt(data: CreateReceiptRequest): Promise<ReceiptDto> {
+    return this.inventoryService.createReceipt(data);
+  }
+
+  @GrpcMethod('InventoryService', 'AdjustStock')
+  async adjustStock(data: AdjustStockRequest): Promise<AdjustStockResponse> {
+    return this.inventoryService.adjustStock(data);
   }
 }
