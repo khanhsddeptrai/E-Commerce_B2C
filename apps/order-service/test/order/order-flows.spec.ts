@@ -289,6 +289,23 @@ describe('OrderService – luồng đơn hàng với InventoryService', () => {
       expect(inventory.callsOf('shipStock')).toEqual([{ order_id: order.id, performed_by: 'ADMIN_a@test' }]);
     });
 
+    it('ghi chú nội bộ của admin khi đổi trạng thái không ghi đè ghi chú của khách', async () => {
+      const order = (await placeOrder('COD')).order!;
+
+      const res = await service.updateDeliveryStatus({
+        order_id: order.id,
+        new_status: 'SHIPPING',
+        note: 'Ghi chú nội bộ của kho',
+        changed_by: 'ADMIN_a@test',
+      });
+
+      expect(res.order?.note).toBe('Giao giờ hành chính');
+      expect(res.order?.status_history?.some((h) => h.note === 'Ghi chú nội bộ của kho')).toBe(true);
+      expect((await service.getOrderById({ order_id: order.id, customer_id: CUSTOMER })).order?.note).toBe(
+        'Giao giờ hành chính'
+      );
+    });
+
     it('cập nhật vị trí khi đang giao: không xuất kho lần nữa', async () => {
       const order = (await placeOrder('COD')).order!;
       await update(order.id, 'SHIPPING');

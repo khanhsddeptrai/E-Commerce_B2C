@@ -600,10 +600,8 @@ export class OrderService {
       order_status: order.orderStatus,
       voucher_code: order.voucherCode || undefined,
       cancel_reason: order.cancelReason || undefined,
-      note:
-        order.statusHistory && order.statusHistory.length > 0
-          ? order.statusHistory[order.statusHistory.length - 1].note || undefined
-          : undefined,
+      // Ghi chú của khách khi đặt hàng — ghi chú nội bộ của admin nằm trong status_history
+      note: order.note || undefined,
       items: order.items.map((i) => ({
         id: i.id,
         sku_id: i.skuId,
