@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package inventory;
+
+// Quản lý kho (WMS) – chạy chung tiến trình gRPC với Product Service (:50052).
+// Mọi RPC thay đổi tồn đều idempotent theo order_id. Xem docs/06-wms-implementation-plan.md
+service InventoryService {
+  rpc GetSkusForOrder (GetSkusForOrderRequest) returns (GetSkusForOrderResponse);
+  rpc HoldStock (HoldStockRequest) returns (StockOperationResponse);
+  rpc CommitStock (CommitStockRequest) returns (StockOperationResponse);
+  rpc ReleaseStock (ReleaseStockRequest) returns (StockOperationResponse);
+  rpc ShipStock (ShipStockRequest) returns (StockOperationResponse);
+}
+
+message StockItem {
+  string sku_id = 1;
+  int32 quantity = 2;
+}
+
+message GetSkusForOrderRequest {
+  repeated string sku_ids = 1;
+}
+
+message OrderSkuDto {
+  string id = 1;
+  string sku_code = 2;
+  string sku_name = 3;
+  string product_id = 4;
+  string product_name = 5;
+  string product_status = 6;
+  double price = 7;
+  bool is_active = 8;
+  string thumbnail_url = 9;
+}
+
+message GetSkusForOrderResponse {
+  repeated OrderSkuDto skus = 1;
+}
+
+// Giữ hàng chờ thanh toán (đơn trực tuyến)
+message HoldStockRequest {
+  string order_id = 1;
+  string order_code = 2;
+  repeated StockItem items = 3;
+  optional int32 ttl_seconds = 4; // Mặc định 900 (15 phút)
+}
+
+// Chốt đơn: chuyển HOLD → COMMITTED. Khi đơn chưa có giữ hàng (COD) hoặc giữ hàng đã hết hạn,
+// items được dùng để giữ hàng lại trực tiếp từ tồn còn bán được
+message CommitStockRequest {
+  string order_id = 1;
+  string order_code = 2;
+  repeated StockItem items = 3;
+}
+
+// Nhả hàng: HOLD / COMMITTED → RELEASED (hết hạn, thanh toán thất bại, hủy trước khi xuất kho)
+message ReleaseStockRequest {
+  string order_id = 1;
+  string reason = 2;
+}
+
+// Xuất kho: COMMITTED → SHIPPED, trừ tồn vật lý và ghi sổ OUTBOUND
+message ShipStockRequest {
+  string order_id = 1;
+  string performed_by = 2;
+}
+
+message ReservationDto {
+  string sku_id = 1;
+  int32 quantity = 2;
+  string status = 3;
+  optional string expires_at = 4;
+}
+
+message StockOperationResponse {
+  bool success = 1;
+  string message = 2;
+  repeated ReservationDto reservations = 3;
+  bool already_processed = 4; // true nếu thao tác đã được thực hiện trước đó (gọi lại)
+}

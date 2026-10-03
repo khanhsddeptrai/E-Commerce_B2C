@@ -1,0 +1,452 @@
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { RpcException } from '@nestjs/microservices';
+import { status } from '@grpc/grpc-js';
+import Redis from 'ioredis';
+import { ProductPrisma } from '@repo/database';
+import {
+  CommitStockRequest,
+  GetSkusForOrderRequest,
+  GetSkusForOrderResponse,
+  HoldStockRequest,
+  ReleaseStockRequest,
+  ReservationDto,
+  ShipStockRequest,
+  StockItem,
+  StockOperationResponse,
+} from '@repo/proto';
+import { PrismaProductService } from '../prisma/prisma-product.service';
+import { RESERVE_MULTI_LUA, RESTORE_MULTI_LUA, stockKey } from './stock-scripts';
+
+const DEFAULT_HOLD_TTL_SECONDS = 15 * 60;
+
+type Reservation = ProductPrisma.InventoryReservation;
+
+interface NormalizedItem {
+  skuId: string;
+  quantity: number;
+}
+
+function rpcError(code: status, message: string): RpcException {
+  return new RpcException({ code, message });
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  return err instanceof ProductPrisma.Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+}
+
+/** Lỗi nội bộ báo hiệu một request khác đã xử lý cùng đơn hàng trong lúc này */
+class ConcurrentOrderOperation extends Error {}
+
+/**
+ * Quản lý tồn kho theo đơn hàng (WMS – docs/06-wms-implementation-plan.md).
+ *
+ * Nguồn sự thật: inventory_stocks (on_hand, reserved) + inventory_reservations trong PostgreSQL.
+ * Redis stock:{skuId} = Σ(on_hand − reserved) − Σ HOLD chưa nhả, dùng để giữ hàng nhanh & nguyên tử.
+ * Nguyên tắc khi có lỗi giữa chừng: luôn nghiêng về phía Redis THẤP hơn thực tế (bán thiếu),
+ * không bao giờ cao hơn (bán vượt); ReconcileStock sẽ dựng lại Redis từ database.
+ */
+@Injectable()
+export class InventoryService implements OnModuleDestroy {
+  private readonly logger = new Logger(InventoryService.name);
+  private readonly redis: Redis;
+  private defaultWarehouseId: string | null = null;
+
+  constructor(private readonly prisma: PrismaProductService) {
+    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+    this.redis = new Redis(redisUrl, { maxRetriesPerRequest: 3 });
+  }
+
+  onModuleDestroy(): void {
+    this.redis.disconnect();
+  }
+
+  // ---------- RPC ----------
+
+  async getSkusForOrder(data: GetSkusForOrderRequest): Promise<GetSkusForOrderResponse> {
+    const ids = [...new Set(data.sku_ids || [])];
+    if (ids.length === 0) return { skus: [] };
+
+    const skus = await this.prisma.productSku.findMany({
+      where: { id: { in: ids } },
+      include: { product: true },
+    });
+
+    return {
+      skus: skus.map((s) => ({
+        id: s.id,
+        sku_code: s.skuCode,
+        sku_name: s.name,
+        product_id: s.productId,
+        product_name: s.product.name,
+        product_status: s.product.status,
+        price: Number(s.price),
+        is_active: s.isActive,
+        thumbnail_url: s.imageUrl || s.product.thumbnailUrl,
+      })),
+    };
+  }
+
+  /** Giữ hàng chờ thanh toán: trừ Redis nguyên tử cho mọi SKU, tạo reservation HOLD có hạn */
+  async holdStock(data: HoldStockRequest): Promise<StockOperationResponse> {
+    this.assertOrderRef(data.order_id, data.order_code);
+    const items = this.normalizeItems(data.items);
+
+    const existing = await this.findReservations(data.order_id);
+    if (existing.length > 0) {
+      return this.respond(existing, true, 'Đơn hàng đã được giữ hàng trước đó');
+    }
+
+    const warehouseId = await this.getDefaultWarehouseId();
+    await this.reserveInRedis(items);
+
+    const ttl = data.ttl_seconds && data.ttl_seconds > 0 ? data.ttl_seconds : DEFAULT_HOLD_TTL_SECONDS;
+    const expiresAt = new Date(Date.now() + ttl * 1000);
+
+    try {
+      const created = await this.prisma.$transaction(
+        items.map((item) =>
+          this.prisma.inventoryReservation.create({
+            data: {
+              orderId: data.order_id,
+              orderCode: data.order_code,
+              skuId: item.skuId,
+              warehouseId,
+              quantity: item.quantity,
+              status: 'HOLD',
+              expiresAt,
+            },
+          }),
+        ),
+      );
+      return this.respond(created, false, 'Giữ hàng thành công');
+    } catch (err: unknown) {
+      await this.restoreInRedis(items);
+      if (isUniqueViolation(err)) {
+        // Một request khác vừa giữ hàng cho cùng đơn này
+        return this.respond(await this.findReservations(data.order_id), true, 'Đơn hàng đã được giữ hàng trước đó');
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Chốt đơn:
+   * - Có giữ hàng HOLD → chuyển COMMITTED, reserved += số lượng (Redis đã trừ lúc giữ hàng).
+   * - Chưa có giữ hàng (COD) hoặc giữ hàng đã bị nhả do hết hạn → giữ lại từ tồn còn bán được theo items;
+   *   không đủ hàng → RESOURCE_EXHAUSTED.
+   */
+  async commitStock(data: CommitStockRequest): Promise<StockOperationResponse> {
+    this.assertOrderRef(data.order_id, data.order_code);
+    const existing = await this.findReservations(data.order_id);
+    const holds = existing.filter((r) => r.status === 'HOLD');
+
+    if (holds.length > 0) {
+      const committedCount = await this.prisma.$transaction(async (tx) => {
+        let count = 0;
+        for (const hold of holds) {
+          const res = await tx.inventoryReservation.updateMany({
+            where: { id: hold.id, status: 'HOLD' },
+            data: { status: 'COMMITTED', expiresAt: null },
+          });
+          if (res.count === 0) continue;
+          await tx.inventoryStock.update({
+            where: { skuId_warehouseId: { skuId: hold.skuId, warehouseId: hold.warehouseId } },
+            data: { reserved: { increment: hold.quantity }, version: { increment: 1 } },
+          });
+          count += 1;
+        }
+        return count;
+      });
+      return this.respond(
+        await this.findReservations(data.order_id),
+        committedCount === 0,
+        committedCount > 0 ? 'Chốt đơn thành công' : 'Đơn hàng đã được chốt trước đó',
+      );
+    }
+
+    const hasActive = existing.some((r) => r.status === 'COMMITTED' || r.status === 'SHIPPED');
+    if (hasActive) {
+      return this.respond(existing, true, 'Đơn hàng đã được chốt trước đó');
+    }
+
+    // Không có giữ hàng còn hiệu lực: giữ lại trực tiếp từ tồn còn bán được
+    const items = this.normalizeItems(data.items);
+    const warehouseId = await this.getDefaultWarehouseId();
+    await this.reserveInRedis(items);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        for (const item of items) {
+          const previous = existing.find((r) => r.skuId === item.skuId && r.warehouseId === warehouseId);
+          if (previous) {
+            const res = await tx.inventoryReservation.updateMany({
+              where: { id: previous.id, status: 'RELEASED' },
+              data: { status: 'COMMITTED', quantity: item.quantity, expiresAt: null },
+            });
+            if (res.count === 0) throw new ConcurrentOrderOperation();
+          } else {
+            await tx.inventoryReservation.create({
+              data: {
+                orderId: data.order_id,
+                orderCode: data.order_code,
+                skuId: item.skuId,
+                warehouseId,
+                quantity: item.quantity,
+                status: 'COMMITTED',
+              },
+            });
+          }
+          await tx.inventoryStock.update({
+            where: { skuId_warehouseId: { skuId: item.skuId, warehouseId } },
+            data: { reserved: { increment: item.quantity }, version: { increment: 1 } },
+          });
+        }
+      });
+    } catch (err: unknown) {
+      await this.restoreInRedis(items);
+      if (err instanceof ConcurrentOrderOperation || isUniqueViolation(err)) {
+        return this.respond(await this.findReservations(data.order_id), true, 'Đơn hàng đã được chốt trước đó');
+      }
+      throw err;
+    }
+
+    return this.respond(await this.findReservations(data.order_id), false, 'Chốt đơn thành công');
+  }
+
+  /** Nhả hàng: HOLD / COMMITTED → RELEASED, giảm reserved (nếu đã chốt) và cộng trả Redis */
+  async releaseStock(data: ReleaseStockRequest): Promise<StockOperationResponse> {
+    if (!data.order_id) throw rpcError(status.INVALID_ARGUMENT, 'Thiếu mã đơn hàng');
+    const existing = await this.findReservations(data.order_id);
+
+    if (existing.length === 0) {
+      return this.respond(existing, true, 'Đơn hàng không có giữ hàng nào');
+    }
+    if (existing.some((r) => r.status === 'SHIPPED')) {
+      throw rpcError(
+        status.FAILED_PRECONDITION,
+        'Đơn hàng đã xuất kho, không thể nhả hàng – hãy dùng chức năng nhận hàng hoàn',
+      );
+    }
+
+    const released = await this.prisma.$transaction(async (tx) => {
+      const done: Reservation[] = [];
+      for (const r of existing) {
+        if (r.status !== 'HOLD' && r.status !== 'COMMITTED') continue;
+        const res = await tx.inventoryReservation.updateMany({
+          where: { id: r.id, status: r.status },
+          data: { status: 'RELEASED', expiresAt: null },
+        });
+        if (res.count === 0) continue;
+        if (r.status === 'COMMITTED') {
+          await tx.inventoryStock.update({
+            where: { skuId_warehouseId: { skuId: r.skuId, warehouseId: r.warehouseId } },
+            data: { reserved: { decrement: r.quantity }, version: { increment: 1 } },
+          });
+        }
+        done.push(r);
+      }
+      return done;
+    });
+
+    if (released.length > 0) {
+      await this.restoreInRedis(this.mergeItems(released));
+      this.logger.log(`Nhả hàng đơn ${data.order_id} (${data.reason || 'không rõ lý do'}): ${released.length} dòng`);
+    }
+
+    return this.respond(
+      await this.findReservations(data.order_id),
+      released.length === 0,
+      released.length > 0 ? 'Nhả hàng thành công' : 'Đơn hàng đã được nhả hàng trước đó',
+    );
+  }
+
+  /** Xuất kho: COMMITTED → SHIPPED, on_hand và reserved cùng giảm, ghi sổ OUTBOUND (Redis không đổi) */
+  async shipStock(data: ShipStockRequest): Promise<StockOperationResponse> {
+    if (!data.order_id) throw rpcError(status.INVALID_ARGUMENT, 'Thiếu mã đơn hàng');
+    const existing = await this.findReservations(data.order_id);
+
+    if (existing.length === 0) {
+      throw rpcError(status.NOT_FOUND, 'Đơn hàng chưa có giữ hàng nào trong kho');
+    }
+    if (existing.some((r) => r.status === 'HOLD')) {
+      throw rpcError(status.FAILED_PRECONDITION, 'Đơn hàng chưa được chốt, không thể xuất kho');
+    }
+    const committed = existing.filter((r) => r.status === 'COMMITTED');
+    if (committed.length === 0) {
+      if (existing.some((r) => r.status === 'SHIPPED')) {
+        return this.respond(existing, true, 'Đơn hàng đã được xuất kho trước đó');
+      }
+      throw rpcError(status.FAILED_PRECONDITION, 'Đơn hàng đã được nhả hàng, không thể xuất kho');
+    }
+
+    const shippedCount = await this.prisma.$transaction(async (tx) => {
+      let count = 0;
+      for (const r of committed) {
+        const res = await tx.inventoryReservation.updateMany({
+          where: { id: r.id, status: 'COMMITTED' },
+          data: { status: 'SHIPPED' },
+        });
+        if (res.count === 0) continue;
+        const stock = await tx.inventoryStock.update({
+          where: { skuId_warehouseId: { skuId: r.skuId, warehouseId: r.warehouseId } },
+          data: {
+            onHand: { decrement: r.quantity },
+            reserved: { decrement: r.quantity },
+            version: { increment: 1 },
+          },
+        });
+        await tx.inventoryTransaction.create({
+          data: {
+            skuId: r.skuId,
+            warehouseId: r.warehouseId,
+            type: 'OUTBOUND',
+            quantity: -r.quantity,
+            balanceAfter: stock.onHand,
+            refType: 'ORDER',
+            refId: r.orderCode,
+            note: `Xuất kho giao đơn ${r.orderCode}`,
+            createdBy: data.performed_by || 'SYSTEM',
+          },
+        });
+        count += 1;
+      }
+      return count;
+    });
+
+    return this.respond(
+      await this.findReservations(data.order_id),
+      shippedCount === 0,
+      shippedCount > 0 ? 'Xuất kho thành công' : 'Đơn hàng đã được xuất kho trước đó',
+    );
+  }
+
+  // ---------- Redis ----------
+
+  /** Trừ Redis nguyên tử cho mọi SKU; thiếu hàng → RESOURCE_EXHAUSTED kèm tên SKU */
+  private async reserveInRedis(items: NormalizedItem[]): Promise<void> {
+    await this.ensureStockKeys(items.map((i) => i.skuId));
+    const keys = items.map((i) => stockKey(i.skuId));
+    const quantities = items.map((i) => i.quantity);
+    const failedIndex = (await this.redis.eval(RESERVE_MULTI_LUA, keys.length, ...keys, ...quantities)) as number;
+
+    if (failedIndex !== 0) {
+      const failed = items[failedIndex - 1];
+      const sku = failed
+        ? await this.prisma.productSku.findUnique({ where: { id: failed.skuId }, include: { product: true } })
+        : null;
+      const label = sku ? `"${sku.product.name} (${sku.name})"` : 'trong đơn';
+      throw rpcError(status.RESOURCE_EXHAUSTED, `Sản phẩm ${label} không đủ số lượng tồn kho`);
+    }
+  }
+
+  /** Cộng trả Redis sau khi database đã cập nhật; lỗi Redis chỉ ghi log (Redis thấp hơn thực tế = an toàn) */
+  private async restoreInRedis(items: NormalizedItem[]): Promise<void> {
+    if (items.length === 0) return;
+    try {
+      const keys = items.map((i) => stockKey(i.skuId));
+      await this.redis.eval(RESTORE_MULTI_LUA, keys.length, ...keys, ...items.map((i) => i.quantity));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Không cộng trả được tồn Redis (cần ReconcileStock): ${message}`);
+    }
+  }
+
+  /** Khởi tạo key Redis còn thiếu từ database (SET NX để không ghi đè giá trị đang dùng) */
+  private async ensureStockKeys(skuIds: string[]): Promise<void> {
+    const values = await this.redis.mget(...skuIds.map(stockKey));
+    const missing = skuIds.filter((_, idx) => values[idx] === null);
+    if (missing.length === 0) return;
+
+    const available = await this.computeAvailableFromDb(missing);
+    const pipeline = this.redis.pipeline();
+    for (const skuId of missing) {
+      pipeline.set(stockKey(skuId), Math.max(0, available.get(skuId) ?? 0), 'NX');
+    }
+    await pipeline.exec();
+  }
+
+  /** Còn bán được = Σ(on_hand − reserved) − Σ HOLD chưa nhả (kể cả đã quá hạn nhưng worker chưa xử lý) */
+  private async computeAvailableFromDb(skuIds: string[]): Promise<Map<string, number>> {
+    const [stocks, holds] = await Promise.all([
+      this.prisma.inventoryStock.groupBy({
+        by: ['skuId'],
+        where: { skuId: { in: skuIds } },
+        _sum: { onHand: true, reserved: true },
+      }),
+      this.prisma.inventoryReservation.groupBy({
+        by: ['skuId'],
+        where: { skuId: { in: skuIds }, status: 'HOLD' },
+        _sum: { quantity: true },
+      }),
+    ]);
+
+    const available = new Map<string, number>();
+    for (const s of stocks) {
+      available.set(s.skuId, (s._sum.onHand ?? 0) - (s._sum.reserved ?? 0));
+    }
+    for (const h of holds) {
+      available.set(h.skuId, (available.get(h.skuId) ?? 0) - (h._sum.quantity ?? 0));
+    }
+    return available;
+  }
+
+  // ---------- Tiện ích ----------
+
+  private async getDefaultWarehouseId(): Promise<string> {
+    if (this.defaultWarehouseId) return this.defaultWarehouseId;
+    const warehouse = await this.prisma.warehouse.findFirst({ where: { isDefault: true, isActive: true } });
+    if (!warehouse) {
+      throw rpcError(
+        status.FAILED_PRECONDITION,
+        'Chưa khởi tạo kho mặc định – chạy pnpm --filter @repo/database db:inventory:backfill',
+      );
+    }
+    this.defaultWarehouseId = warehouse.id;
+    return warehouse.id;
+  }
+
+  private findReservations(orderId: string): Promise<Reservation[]> {
+    return this.prisma.inventoryReservation.findMany({ where: { orderId }, orderBy: { createdAt: 'asc' } });
+  }
+
+  private assertOrderRef(orderId: string, orderCode: string): void {
+    if (!orderId || !orderCode) {
+      throw rpcError(status.INVALID_ARGUMENT, 'Thiếu mã đơn hàng (order_id, order_code)');
+    }
+  }
+
+  /** Gộp SKU trùng và kiểm tra số lượng là số nguyên dương */
+  private normalizeItems(items: StockItem[] | undefined): NormalizedItem[] {
+    if (!items || items.length === 0) {
+      throw rpcError(status.INVALID_ARGUMENT, 'Danh sách sản phẩm cần giữ hàng không được rỗng');
+    }
+    for (const item of items) {
+      if (!item.sku_id || !Number.isInteger(item.quantity) || item.quantity <= 0) {
+        throw rpcError(status.INVALID_ARGUMENT, 'Mỗi sản phẩm cần sku_id và số lượng nguyên dương');
+      }
+    }
+    return this.mergeItems(items.map((i) => ({ skuId: i.sku_id, quantity: i.quantity })));
+  }
+
+  private mergeItems(items: { skuId: string; quantity: number }[]): NormalizedItem[] {
+    const merged = new Map<string, number>();
+    for (const item of items) merged.set(item.skuId, (merged.get(item.skuId) ?? 0) + item.quantity);
+    return [...merged.entries()].map(([skuId, quantity]) => ({ skuId, quantity }));
+  }
+
+  private respond(reservations: Reservation[], alreadyProcessed: boolean, message: string): StockOperationResponse {
+    return {
+      success: true,
+      message,
+      already_processed: alreadyProcessed,
+      reservations: reservations.map(
+        (r): ReservationDto => ({
+          sku_id: r.skuId,
+          quantity: r.quantity,
+          status: r.status,
+          expires_at: r.expiresAt ? r.expiresAt.toISOString() : undefined,
+        }),
+      ),
+    };
+  }
+}

@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { RpcException } from '@nestjs/microservices';
 import { OrderPrisma, OrderPrismaClient, ProductPrisma, ProductPrismaClient } from '@repo/database';
 import { PrismaProductService } from '../src/prisma/prisma-product.service';
 import { assertTestDatabaseName, getTestOrderDatabaseUrl, TEST_REDIS_DB } from './test-env';
@@ -34,6 +35,20 @@ export async function flushTestRedis(redis: Redis): Promise<void> {
     throw new Error(`Từ chối FLUSHDB trên Redis DB ${redis.options.db}: chỉ được dùng DB ${TEST_REDIS_DB} cho test`);
   }
   await redis.flushdb();
+}
+
+/** Kiểm tra promise bị từ chối bằng RpcException với đúng mã gRPC */
+export async function expectRpcError(promise: Promise<unknown>, code: number, messagePattern?: RegExp): Promise<void> {
+  let caught: unknown;
+  try {
+    await promise;
+  } catch (err: unknown) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(RpcException);
+  const error = (caught as RpcException).getError() as { code: number; message: string };
+  expect(error.code).toBe(code);
+  if (messagePattern) expect(error.message).toMatch(messagePattern);
 }
 
 // ---------- Fixtures ----------
@@ -136,4 +151,24 @@ export async function createProduct(prisma: PrismaProductService, input: Product
     },
     include: { skus: true },
   });
+}
+
+export async function createWarehouse(prisma: PrismaProductService, isDefault = true) {
+  const n = nextId();
+  return prisma.warehouse.create({ data: { code: `WH-${n}`, name: `Kho ${n}`, isDefault } });
+}
+
+/** Tạo 1 SKU kèm dòng tồn tại kho cho trước */
+export async function createStockedSku(
+  prisma: PrismaProductService,
+  warehouseId: string,
+  stock: { onHand: number; reserved?: number },
+) {
+  const category = await createCategory(prisma);
+  const product = await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 0 }] });
+  const sku = product.skus[0]!;
+  await prisma.inventoryStock.create({
+    data: { skuId: sku.id, warehouseId, onHand: stock.onHand, reserved: stock.reserved ?? 0 },
+  });
+  return { sku, product };
 }

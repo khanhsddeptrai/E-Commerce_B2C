@@ -19,7 +19,12 @@ dotenv.config();
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
-import { PRODUCT_PROTO_PATH, PRODUCT_PACKAGE_NAME } from '@repo/proto';
+import {
+  INVENTORY_PACKAGE_NAME,
+  INVENTORY_PROTO_PATH,
+  PRODUCT_PACKAGE_NAME,
+  PRODUCT_PROTO_PATH,
+} from '@repo/proto';
 
 async function bootstrap() {
   const port = process.env.PRODUCT_GRPC_PORT || '50052';
@@ -28,8 +33,9 @@ async function bootstrap() {
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
     transport: Transport.GRPC,
     options: {
-      package: PRODUCT_PACKAGE_NAME,
-      protoPath: PRODUCT_PROTO_PATH,
+      // Product Service phục vụ cả catalog (product) và quản lý kho (inventory) trên cùng cổng
+      package: [PRODUCT_PACKAGE_NAME, INVENTORY_PACKAGE_NAME],
+      protoPath: [PRODUCT_PROTO_PATH, INVENTORY_PROTO_PATH],
       url: `${host}:${port}`,
       loader: {
         keepCase: true,

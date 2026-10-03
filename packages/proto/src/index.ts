@@ -316,6 +316,81 @@ export interface ProductServiceClient {
   getBrands(request: GetBrandsRequest): Observable<GetBrandsResponse>;
 }
 
+export const INVENTORY_PROTO_PATH = getProtoPath('inventory.proto');
+export const INVENTORY_PACKAGE_NAME = 'inventory';
+
+export interface StockItem {
+  sku_id: string;
+  quantity: number;
+}
+
+export interface GetSkusForOrderRequest {
+  sku_ids: string[];
+}
+
+export interface OrderSkuDto {
+  id: string;
+  sku_code: string;
+  sku_name: string;
+  product_id: string;
+  product_name: string;
+  product_status: string;
+  price: number;
+  is_active: boolean;
+  thumbnail_url: string;
+}
+
+export interface GetSkusForOrderResponse {
+  skus: OrderSkuDto[];
+}
+
+export interface HoldStockRequest {
+  order_id: string;
+  order_code: string;
+  items: StockItem[];
+  ttl_seconds?: number;
+}
+
+export interface CommitStockRequest {
+  order_id: string;
+  order_code: string;
+  items: StockItem[];
+}
+
+export interface ReleaseStockRequest {
+  order_id: string;
+  reason: string;
+}
+
+export interface ShipStockRequest {
+  order_id: string;
+  performed_by: string;
+}
+
+export type ReservationStatusValue = 'HOLD' | 'COMMITTED' | 'RELEASED' | 'SHIPPED';
+
+export interface ReservationDto {
+  sku_id: string;
+  quantity: number;
+  status: ReservationStatusValue;
+  expires_at?: string;
+}
+
+export interface StockOperationResponse {
+  success: boolean;
+  message: string;
+  reservations: ReservationDto[];
+  already_processed: boolean;
+}
+
+export interface InventoryServiceClient {
+  getSkusForOrder(request: GetSkusForOrderRequest): Observable<GetSkusForOrderResponse>;
+  holdStock(request: HoldStockRequest): Observable<StockOperationResponse>;
+  commitStock(request: CommitStockRequest): Observable<StockOperationResponse>;
+  releaseStock(request: ReleaseStockRequest): Observable<StockOperationResponse>;
+  shipStock(request: ShipStockRequest): Observable<StockOperationResponse>;
+}
+
 export const ORDER_PROTO_PATH = getProtoPath('order.proto');
 export const ORDER_PACKAGE_NAME = 'order';
 

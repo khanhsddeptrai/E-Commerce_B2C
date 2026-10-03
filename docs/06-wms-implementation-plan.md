@@ -34,7 +34,7 @@ Tồn kho hiện nằm ở 3 nơi: `product_skus.stock_quantity` (bị trừ lú
 ```
 on_hand    tồn vật lý trong kho     — chỉ đổi khi: nhập kho, xuất kho, nhận hàng hoàn, kiểm kê
 reserved   đã chốt đơn, chưa xuất   — tăng khi chốt đơn, giảm khi xuất kho / hủy trước khi xuất
-held       đang giữ chờ thanh toán  — tổng các reservation HOLD còn hạn
+held       đang giữ chờ thanh toán  — tổng các reservation HOLD chưa nhả (kể cả đã quá hạn nhưng worker chưa xử lý)
 available  = on_hand − reserved − held   → cache Redis stock:{skuId} (tổng mọi kho)
 ```
 
@@ -133,6 +133,10 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - Test Jest cho từng RPC: idempotency (gọi 2 lần), đồng thời, các chuyển trạng thái trong bảng mục 3.
 - Đọc tồn trong `getProducts`/`getAdminProducts`/stats chuyển sang `inventory_stocks` + Redis.
 - `createProduct` khởi tạo tồn ban đầu bằng giao dịch `INBOUND` (ref `OPENING`); `updateProduct` không còn sửa tồn.
+- Chia 3 phần:
+  - **2a ✅** *(2026-10-03)* — `inventory.proto` (package `inventory`, `InventoryService` chạy chung cổng :50052) với `GetSkusForOrder`, `HoldStock`, `CommitStock`, `ReleaseStock`, `ShipStock`; Lua giữ hàng nhiều SKU nguyên tử, cộng trả chỉ khi key tồn tại; 32 test gồm tranh chấp đồng thời (đã kiểm chứng test bắt được lỗi khi bỏ điều kiện chống trùng).
+  - **2b** — Nhập kho (phiếu nhập), điều chỉnh kiểm kê, nhận hàng hoàn; `createProduct`/`updateProduct`/`updateSkuStock` chuyển sang mô hình mới.
+  - **2c** — API đọc tồn / sổ kho có phân trang, worker nhả giữ hàng hết hạn, `ReconcileStock`; catalog đọc tồn từ `inventory_stocks`.
 
 ### Bước 3 — Refactor Order Service
 - Bỏ `ProductPrismaClient`, `RESERVE_STOCK_LUA`, `safeRestoreRedisStock`, `ExpiredOrderWorker` phần kho; gọi RPC mới qua gRPC client.

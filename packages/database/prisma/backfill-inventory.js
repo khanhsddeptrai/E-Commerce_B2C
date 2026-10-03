@@ -4,7 +4,7 @@
  * Mô hình cũ:  product_skus.stock_quantity bị trừ ngay khi CHỐT ĐƠN (COD lúc đặt, VNPAY lúc thanh toán)
  *              + order_db.inventory_reservations + Redis stock:{skuId}
  * Mô hình mới: inventory_stocks.on_hand (tồn vật lý, trừ lúc XUẤT KHO) + reserved (đã chốt, chưa xuất)
- *              + inventory_reservations (product_db) + Redis stock:{skuId} = on_hand − reserved − HOLD còn hạn
+ *              + inventory_reservations (product_db) + Redis stock:{skuId} = on_hand − reserved − HOLD chưa nhả
  *
  * Quy tắc chuyển đổi cho mỗi SKU chưa có dòng tồn ở kho mặc định:
  *   - Đơn CONFIRMED / PROCESSING (đã chốt, chưa xuất kho):
@@ -150,10 +150,12 @@ async function backfillInventory({ productPrisma, orderPrisma, redis, now = new 
     }
   });
 
-  // 4. Dựng lại Redis: còn bán được = Σ(on_hand − reserved) − Σ HOLD còn hạn, trên mọi kho
+  // 4. Dựng lại Redis: còn bán được = Σ(on_hand − reserved) − Σ HOLD chưa nhả, trên mọi kho
+  // (cùng công thức với InventoryService.computeAvailableFromDb: HOLD quá hạn vẫn tính cho tới khi worker nhả,
+  //  nếu không lúc worker nhả và cộng trả Redis sẽ bị cộng hai lần)
   const stocks = await productPrisma.inventoryStock.findMany({ select: { skuId: true, onHand: true, reserved: true } });
   const holds = await productPrisma.inventoryReservation.findMany({
-    where: { status: 'HOLD', expiresAt: { gt: now } },
+    where: { status: 'HOLD' },
     select: { skuId: true, quantity: true },
   });
   const availableBySku = new Map();
