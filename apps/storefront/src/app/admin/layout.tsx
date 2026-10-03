@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Boxes,
+  Warehouse,
   Package,
   ShoppingBag,
   Users,
@@ -168,6 +169,13 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       badge: null,
     },
     {
+      name: 'Quản Lý Kho',
+      href: '/admin/inventory',
+      icon: Warehouse,
+      active: pathname.startsWith('/admin/inventory'),
+      badge: null,
+    },
+    {
       name: 'Khách Hàng',
       href: '#',
       icon: Users,
@@ -189,6 +197,8 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
       badge: 'Sắp ra mắt',
     },
   ];
+
+  const activeNavName = navItems.find((item) => item.active)?.name ?? 'Quản Lý Đơn Hàng';
 
   return (
     <div className="min-h-screen flex bg-slate-900 text-slate-100 selection:bg-indigo-500 selection:text-white">
@@ -411,7 +421,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
             <div className="flex items-center gap-2 text-xs">
               <span className="text-slate-400 hidden sm:inline">Admin Console</span>
               <span className="text-slate-600 hidden sm:inline">/</span>
-              <span className="font-bold text-white">Quản Lý Đơn Hàng</span>
+              <span className="font-bold text-white">{activeNavName}</span>
             </div>
           </div>
 

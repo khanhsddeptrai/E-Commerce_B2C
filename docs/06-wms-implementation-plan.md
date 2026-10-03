@@ -178,7 +178,7 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
     - *Kiểm thử end-to-end trên hệ thống dev đang chạy (gateway thật + VNPAY sandbox), SKU `NV-SND-SLV`: đặt COD → bàn giao shipper (sổ kho `OUTBOUND -1`) → giao thành công (COD tự PAID); khách hủy đơn COD đã chốt (trả lại hàng – lỗi #3 đã sửa); đặt quá số còn bán → HTTP 409; VNPAY khách hủy trên trang VNPAY → CANCELLED + nhả hàng; VNPAY thanh toán thành công bằng thẻ test NCB → CONFIRMED + PAID + chốt hàng. Mọi bước khớp số liệu dự kiến, mọi task kho `DONE`, `ReconcileStock` cuối: 36 SKU lệch 0.*
     - *Lỗi có sẵn phát hiện khi kiểm thử: order-service nạp bản `@nestjs/microservices` khác với bản `@nestjs/core` dùng (khác peer `ioredis`) nên `instanceof RpcException` luôn sai → mọi lỗi nghiệp vụ thành "Internal server error" (HTTP 500). Đã sửa bằng `GrpcExceptionFilter` toàn cục (nhận diện theo hình dạng thay vì `instanceof`) đăng ký qua `APP_FILTER`.*
 
-### Bước 4 — API Gateway & giao diện Admin ⏳ *(bước tiếp theo – chi tiết ở mục 8)*
+### Bước 4 — API Gateway & giao diện Admin ✅ *(code xong 2026-10-03, API đã test bằng curl; giao diện chờ người dùng kiểm tra trên trình duyệt)*
 - Endpoint REST cho kho (có phân trang theo quy chuẩn `items/total/page/limit`), chỉ `ADMIN`.
 - Trang `/admin/inventory`: tab Tồn kho (thực tế / đã chốt / đang giữ / bán được), tab Phiếu nhập (tạo + danh sách), tab Sổ xuất nhập tồn (lọc SKU, loại, thời gian).
 - `/admin/orders`: nút "Xác nhận xuất kho" (đơn `CONFIRMED` → `SHIPPING`) và "Nhận hàng hoàn".
@@ -208,7 +208,8 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - **Việc dở dang:** không có code dở dang. Đầu phiên chạy `git status`; nếu còn thay đổi ở `CLAUDE.md` / file này thì đó là phần bàn giao chưa commit (`docs(wms): thêm hướng dẫn bàn giao cho bước 4 và 5`).
 - Dữ liệu test còn lại trên dev: 6 đơn của `admin@novatech.com` có ghi chú "Đơn test tự động WMS"; đơn `ORD-261003-D8Q6` đang CONFIRMED + PAID, giữ (`COMMITTED`) 1 cái `NV-SND-SLV` — dùng được để test nút "Bàn giao shipper" / "Nhận hàng hoàn" ở Bước 4.
 
-### 8.2. Bước 4 — việc cần làm
+### 8.2. Bước 4 — việc cần làm ✅ *(đã làm xong, giữ lại để tham khảo)*
+> Kết quả: module `apps/api-gateway/src/inventory`, `inventoryService.ts`, trang `/admin/inventory` (`_components/`), sửa `/admin/orders` (badge + thử lại đồng bộ kho, giao thất bại, nhận hàng hoàn, tab `RETURNED`), `/admin/products` (modal nạp tồn thực tế từ kho), trang khách hiển thị `RETURNED`. Lưu ý: `AdjustStock` từ chối giảm vượt **số còn bán** (không chỉ vượt `reserved`). Dữ liệu test trên dev: phiếu `GRN-261003-XO79` (+1 `NV-SND-BLK`) và `ADJ-261003-GWW5` (−1) bù trừ nhau. Còn tồn đọng: trang `/admin/orders` vẫn tải tối đa 50 đơn (order-service giới hạn `limit` 50) và lọc phía client, chưa có thanh phân trang.
 **a) API Gateway** (`apps/api-gateway`)
 - Thêm gRPC client `InventoryService` (package `INVENTORY_PACKAGE_NAME`, `INVENTORY_PROTO_PATH`, url `PRODUCT_GRPC_URL`) — làm giống `catalog.module.ts`.
 - Module mới `inventory` với các endpoint (đều `JwtAuthGuard` + kiểm tra `role === 'ADMIN'`):

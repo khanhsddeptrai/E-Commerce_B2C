@@ -25,6 +25,7 @@ import {
   HelpCircle,
   Copy,
   Check,
+  Undo2,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { orderService } from '@/services/orderService';
@@ -132,7 +133,7 @@ export default function OrderDetailsPage({ params }: PageProps) {
 
   // Tính bước hiện tại trong tiến trình vận chuyển (Chuẩn 4 bước)
   const getTimelineStep = (orderStatus: string, paymentStatus: string) => {
-    if (orderStatus === 'CANCELLED') return -1;
+    if (orderStatus === 'CANCELLED' || orderStatus === 'RETURNED') return -1;
     if (orderStatus === 'DELIVERED') return 4;
     if (orderStatus === 'SHIPPING') return 3;
     if (orderStatus === 'CONFIRMED' || paymentStatus === 'PAID') return 2;
@@ -238,7 +239,11 @@ export default function OrderDetailsPage({ params }: PageProps) {
           </div>
 
           <div className="flex items-center gap-2">
-            {order.order_status === 'CANCELLED' ? (
+            {order.order_status === 'RETURNED' ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-violet-50 text-violet-700 border border-violet-200">
+                <Undo2 className="w-4 h-4" /> Đã hoàn hàng
+              </span>
+            ) : order.order_status === 'CANCELLED' ? (
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
                 <XCircle className="w-4 h-4" /> Đã hủy đơn hàng
               </span>
@@ -274,8 +279,22 @@ export default function OrderDetailsPage({ params }: PageProps) {
           </div>
         )}
 
+        {/* RETURN NOTICE IF RETURNED */}
+        {order.order_status === 'RETURNED' && (
+          <div className="p-4 bg-violet-50 border border-violet-200 rounded-2xl flex items-start gap-3">
+            <Undo2 className="w-5 h-5 text-violet-600 shrink-0 mt-0.5" />
+            <div className="text-xs space-y-1">
+              <p className="font-bold text-violet-900">Đơn hàng đã được hoàn về kho</p>
+              <p className="text-violet-700">
+                Kiện hàng đã được người bán nhận lại.
+                {order.payment_status === 'PAID' && ' Bộ phận chăm sóc khách hàng sẽ liên hệ để hoàn tiền cho bạn.'}
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ORDER TRACKING TIMELINE UI (4 BƯỚC CHUẨN) */}
-        {order.order_status !== 'CANCELLED' && (
+        {order.order_status !== 'CANCELLED' && order.order_status !== 'RETURNED' && (
           <div className="pt-2 pb-2 space-y-6">
             <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
               <Truck className="w-4 h-4 text-indigo-600" />

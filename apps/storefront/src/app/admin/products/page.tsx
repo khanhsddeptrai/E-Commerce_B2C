@@ -26,7 +26,16 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { productService } from '@/services/productService';
-import { Product, Category, Brand, AdminProductStats, CreateProductInput, UpdateProductInput } from '@/types/ecommerce';
+import { inventoryService } from '@/services/inventoryService';
+import {
+  Product,
+  Category,
+  Brand,
+  AdminProductStats,
+  CreateProductInput,
+  UpdateProductInput,
+  ApiInventoryStockItemDto,
+} from '@/types/ecommerce';
 import { Tooltip } from '@/components/Tooltip';
 import { ResizableDrawer } from '@/components/ResizableDrawer';
 
@@ -101,7 +110,11 @@ export default function AdminProductsPage() {
 
   // Modal Sửa Nhanh Tồn Kho SKU
   const [stockModalProduct, setStockModalProduct] = useState<Product | null>(null);
+  // stock = tồn thực tế mới (on_hand) muốn đặt; backend tự ghi phiếu điều chỉnh phần chênh lệch
   const [skuStockEdits, setSkuStockEdits] = useState<{ [skuId: string]: { stock: number; price: number } }>({});
+  const [skuInventory, setSkuInventory] = useState<{ [skuId: string]: ApiInventoryStockItemDto }>({});
+  const [isLoadingSkuInventory, setIsLoadingSkuInventory] = useState(false);
+  const [stockModalError, setStockModalError] = useState<string | null>(null);
   const [isSavingStock, setIsSavingStock] = useState(false);
 
   // Nạp danh mục, thương hiệu (dùng cho bộ lọc và form) một lần khi vào trang
@@ -297,32 +310,79 @@ export default function AdminProductsPage() {
     }
   };
 
-  // Mở modal sửa nhanh kho SKU
-  const handleOpenStockModal = (prod: Product) => {
+  // Mở modal sửa nhanh kho SKU: nạp tồn thực tế / đã chốt / đang giữ từ hệ thống kho
+  const handleOpenStockModal = async (prod: Product) => {
     setStockModalProduct(prod);
-    const initialEdits: { [skuId: string]: { stock: number; price: number } } = {};
-    prod.variants.forEach((v) => {
-      initialEdits[v.id] = { stock: v.stock, price: v.price };
-    });
-    setSkuStockEdits(initialEdits);
+    setStockModalError(null);
+    setSkuInventory({});
+    setSkuStockEdits({});
+    setIsLoadingSkuInventory(true);
+    try {
+      const res = await inventoryService.getStocks({ search: prod.name, limit: 100 });
+      const skuIds = new Set(prod.variants.map((v) => v.id));
+      const inventoryMap: { [skuId: string]: ApiInventoryStockItemDto } = {};
+      res.items.filter((item) => skuIds.has(item.sku_id)).forEach((item) => {
+        inventoryMap[item.sku_id] = item;
+      });
+      const initialEdits: { [skuId: string]: { stock: number; price: number } } = {};
+      prod.variants.forEach((v) => {
+        const inv = inventoryMap[v.id];
+        if (inv) initialEdits[v.id] = { stock: inv.on_hand, price: v.price };
+      });
+      setSkuInventory(inventoryMap);
+      setSkuStockEdits(initialEdits);
+    } catch (err: unknown) {
+      setStockModalError(err instanceof Error ? err.message : 'Không tải được tồn kho của sản phẩm');
+    } finally {
+      setIsLoadingSkuInventory(false);
+    }
   };
 
-  // Lưu sửa nhanh kho SKU
+  // Lưu sửa nhanh kho SKU (chỉ gửi những SKU có thay đổi)
   const handleSaveStockEdits = async () => {
     if (!stockModalProduct) return;
-    setIsSavingStock(true);
-    try {
-      for (const sku of stockModalProduct.variants) {
-        const edit = skuStockEdits[sku.id];
-        if (edit && (edit.stock !== sku.stock || edit.price !== sku.price)) {
-          await productService.updateSkuStock(sku.id, edit.stock, edit.price);
-        }
+    const changed = stockModalProduct.variants.filter((sku) => {
+      const edit = skuStockEdits[sku.id];
+      const inv = skuInventory[sku.id];
+      return edit && inv && (edit.stock !== inv.on_hand || edit.price !== sku.price);
+    });
+    for (const sku of changed) {
+      const edit = skuStockEdits[sku.id]!;
+      const inv = skuInventory[sku.id]!;
+      if (!Number.isInteger(edit.stock) || edit.stock < 0) {
+        setStockModalError(`Tồn thực tế của "${sku.name}" phải là số nguyên không âm`);
+        return;
       }
-      setFeedbackMessage({ text: 'Cập nhật kho và giá biến thể thành công', type: 'success' });
+      if (edit.stock < inv.reserved + inv.held) {
+        setStockModalError(
+          `Tồn thực tế của "${sku.name}" không thể nhỏ hơn ${inv.reserved + inv.held} (số đang giữ / đã chốt cho đơn hàng chưa xuất kho)`
+        );
+        return;
+      }
+    }
+    if (changed.length === 0) {
       setStockModalProduct(null);
+      return;
+    }
+
+    setIsSavingStock(true);
+    setStockModalError(null);
+    const errors: string[] = [];
+    try {
+      for (const sku of changed) {
+        const edit = skuStockEdits[sku.id]!;
+        const res = await productService.updateSkuStock(sku.id, edit.stock, edit.price);
+        if (!res.success) errors.push(`${sku.name}: ${res.error || 'Cập nhật thất bại'}`);
+      }
+      if (errors.length > 0) {
+        setStockModalError(errors.join(' • '));
+        await handleOpenStockModal(stockModalProduct);
+        setStockModalError(errors.join(' • '));
+      } else {
+        setFeedbackMessage({ text: 'Cập nhật tồn kho và giá biến thể thành công', type: 'success' });
+        setStockModalProduct(null);
+      }
       await fetchData();
-    } catch {
-      setFeedbackMessage({ text: 'Lỗi khi cập nhật tồn kho SKU', type: 'error' });
     } finally {
       setIsSavingStock(false);
     }
@@ -712,7 +772,7 @@ export default function AdminProductsPage() {
                                     : 'text-emerald-400'
                               }`}
                             >
-                              {totalStock} trong kho
+                              {totalStock} còn bán
                             </span>
                           </div>
                           {/* Mini color preview chips */}
@@ -830,7 +890,7 @@ export default function AdminProductsPage() {
                                     <th className="py-2 px-3 text-left">Tên Biến Thể</th>
                                     <th className="py-2 px-3 text-left">Màu Sắc</th>
                                     <th className="py-2 px-3 text-left">Giá Bán</th>
-                                    <th className="py-2 px-3 text-left">Tồn Kho</th>
+                                    <th className="py-2 px-3 text-left">Còn Bán</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800/40">
@@ -1601,7 +1661,7 @@ export default function AdminProductsPage() {
           <div className="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 space-y-4 z-10 animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <span className="text-base font-black text-white block">Sửa Nhanh Tồn Kho SKU</span>
+                <span className="text-base font-black text-white block">Sửa Nhanh Tồn Kho & Giá</span>
                 <span className="text-xs text-slate-400">{stockModalProduct.name}</span>
               </div>
               <button
@@ -1612,9 +1672,27 @@ export default function AdminProductsPage() {
               </button>
             </div>
 
+            <p className="text-[11px] text-slate-400 bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+              Nhập <span className="font-bold text-slate-200">tồn thực tế</span> đếm được trong kho. Hệ thống tự ghi phiếu điều chỉnh
+              phần chênh lệch vào sổ kho; số còn bán = tồn thực tế − đã chốt − đang giữ. Nhập hàng từ nhà cung cấp nên dùng phiếu nhập ở trang Quản Lý Kho.
+            </p>
+
+            {stockModalError && (
+              <div className="p-2.5 rounded-xl text-[11px] font-semibold bg-rose-950/60 text-rose-300 border border-rose-800/80 flex items-start gap-2">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0 mt-0.5" />
+                <span>{stockModalError}</span>
+              </div>
+            )}
+
             <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
-              {stockModalProduct.variants.map((v) => {
-                const currentEdit = skuStockEdits[v.id] || { stock: v.stock, price: v.price };
+              {isLoadingSkuInventory &&
+                stockModalProduct.variants.map((v) => (
+                  <div key={v.id} className="h-[124px] rounded-xl bg-slate-950 border border-slate-800 animate-pulse" />
+                ))}
+              {!isLoadingSkuInventory && stockModalProduct.variants.map((v) => {
+                const inv = skuInventory[v.id];
+                const currentEdit = skuStockEdits[v.id] || { stock: inv?.on_hand ?? 0, price: v.price };
+                const delta = inv ? currentEdit.stock - inv.on_hand : 0;
                 return (
                   <div
                     key={v.id}
@@ -1631,14 +1709,43 @@ export default function AdminProductsPage() {
                       <span className="text-[11px] font-mono text-slate-500">{v.sku}</span>
                     </div>
 
+                    {inv ? (
+                      <div className="grid grid-cols-3 gap-2 text-[11px]">
+                        <div className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="text-slate-500 block">Tồn thực tế</span>
+                          <span className="font-bold text-white">{inv.on_hand}</span>
+                        </div>
+                        <div className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="text-slate-500 block">Đã chốt / Đang giữ</span>
+                          <span className="font-bold text-amber-300">
+                            {inv.reserved} / {inv.held}
+                          </span>
+                        </div>
+                        <div className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="text-slate-500 block">Còn bán</span>
+                          <span className="font-bold text-emerald-400">{inv.available}</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-amber-400">
+                        SKU chưa có tồn tại kho mặc định — hãy tạo phiếu nhập ở trang Quản Lý Kho.
+                      </p>
+                    )}
+
                     <div className="grid grid-cols-2 gap-2.5">
                       <div>
-                        <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
-                          Số lượng tồn kho
+                        <label className="text-[10px] uppercase font-bold text-slate-400 mb-1 flex items-center justify-between">
+                          <span>Tồn thực tế mới</span>
+                          {delta !== 0 && (
+                            <span className={`normal-case ${delta > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {delta > 0 ? `+${delta}` : delta}
+                            </span>
+                          )}
                         </label>
                         <input
                           type="number"
-                          min="0"
+                          min={inv ? inv.reserved + inv.held : 0}
+                          disabled={!inv}
                           value={currentEdit.stock}
                           onChange={(e) => {
                             const val = Number(e.target.value);
@@ -1647,7 +1754,7 @@ export default function AdminProductsPage() {
                               [v.id]: { ...prev[v.id]!, stock: val },
                             }));
                           }}
-                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold focus:outline-hidden focus:border-indigo-500"
+                          className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white font-semibold focus:outline-hidden focus:border-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
                         />
                       </div>
 
@@ -1659,6 +1766,7 @@ export default function AdminProductsPage() {
                           type="number"
                           min="0"
                           step="1000"
+                          disabled={!inv}
                           value={currentEdit.price}
                           onChange={(e) => {
                             const val = Number(e.target.value);
@@ -1687,7 +1795,7 @@ export default function AdminProductsPage() {
               <button
                 type="button"
                 onClick={handleSaveStockEdits}
-                disabled={isSavingStock}
+                disabled={isSavingStock || isLoadingSkuInventory || Object.keys(skuInventory).length === 0}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20 active:scale-95"
               >
                 {isSavingStock ? (

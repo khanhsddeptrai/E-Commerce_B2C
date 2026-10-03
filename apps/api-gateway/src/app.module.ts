@@ -5,8 +5,9 @@ import { RedisModule } from './redis/redis.module';
 import { CartModule } from './cart/cart.module';
 import { OrderModule } from './order/order.module';
 import { PaymentModule } from './payment/payment.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
-  imports: [RedisModule, CartModule, OrderModule, AuthModule, CatalogModule, PaymentModule],
+  imports: [RedisModule, CartModule, OrderModule, AuthModule, CatalogModule, PaymentModule, InventoryModule],
 })
 export class AppModule {}

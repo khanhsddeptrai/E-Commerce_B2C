@@ -17,6 +17,7 @@ import {
   Calendar,
   CreditCard,
   User,
+  Undo2,
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { orderService } from '@/services/orderService';
@@ -69,6 +70,13 @@ export default function AccountOrdersPage() {
   };
 
   const getStatusBadge = (orderStatus: string, paymentStatus: string) => {
+    if (orderStatus === 'RETURNED') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-violet-50 text-violet-700 border border-violet-200">
+          <Undo2 className="w-3.5 h-3.5" /> Đã hoàn hàng
+        </span>
+      );
+    }
     if (orderStatus === 'CANCELLED') {
       return (
         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
@@ -112,6 +120,7 @@ export default function AccountOrdersPage() {
     if (activeFilter === 'SHIPPING') return o.order_status === 'SHIPPING';
     if (activeFilter === 'DELIVERED') return o.order_status === 'DELIVERED';
     if (activeFilter === 'CANCELLED') return o.order_status === 'CANCELLED';
+    if (activeFilter === 'RETURNED') return o.order_status === 'RETURNED';
     return true;
   });
 
@@ -165,6 +174,7 @@ export default function AccountOrdersPage() {
           { key: 'SHIPPING', label: 'Đang giao' },
           { key: 'DELIVERED', label: 'Đã nhận hàng' },
           { key: 'CANCELLED', label: 'Đã hủy' },
+          { key: 'RETURNED', label: 'Đã hoàn hàng' },
         ].map((tab) => (
           <button
             key={tab.key}

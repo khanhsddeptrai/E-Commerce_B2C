@@ -290,7 +290,12 @@ export interface ApiOrderDto {
   shipped_at?: string;
   delivered_at?: string;
   status_history?: ApiOrderStatusHistoryDto[];
+  /** Trạng thái đồng bộ thao tác kho với Product Service (thiếu = OK) */
+  stock_sync_status?: StockSyncStatus;
+  stock_sync_error?: string;
 }
+
+export type StockSyncStatus = 'OK' | 'PENDING' | 'FAILED';
 
 export interface CreateOrderPayload {
   customer_id?: string;
@@ -305,4 +310,119 @@ export interface CreateOrderPayload {
     sku_id: string;
     quantity: number;
   }[];
+}
+
+// ---------- Quản lý kho (WMS) ----------
+
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface ApiInventoryStockItemDto {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  product_id: string;
+  product_name: string;
+  warehouse_id: string;
+  warehouse_code: string;
+  /** Tồn thực tế trong kho */
+  on_hand: number;
+  /** Đã chốt đơn, chưa xuất kho */
+  reserved: number;
+  /** Đang giữ chờ thanh toán */
+  held: number;
+  /** Còn bán được = on_hand − reserved − held */
+  available: number;
+}
+
+export type InventoryTransactionType = 'INBOUND' | 'OUTBOUND' | 'RETURN' | 'ADJUSTMENT';
+
+export interface ApiInventoryTransactionDto {
+  id: string;
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  product_name: string;
+  warehouse_code: string;
+  type: InventoryTransactionType;
+  quantity: number;
+  balance_after: number;
+  ref_type: string;
+  ref_id: string;
+  note: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface ApiReceiptItemDto {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  product_name: string;
+  quantity: number;
+  cost_price: number;
+}
+
+export interface ApiReceiptDto {
+  id: string;
+  code: string;
+  warehouse_id: string;
+  warehouse_code: string;
+  supplier_name: string;
+  note: string;
+  created_by: string;
+  created_at: string;
+  items: ApiReceiptItemDto[];
+  total_quantity: number;
+  total_cost: number;
+}
+
+export interface InventoryStocksQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  low_stock_only?: boolean;
+  low_stock_threshold?: number;
+}
+
+export interface InventoryTransactionsQuery {
+  page?: number;
+  limit?: number;
+  sku_id?: string;
+  type?: InventoryTransactionType;
+  ref_id?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface ReceiptsQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+}
+
+export interface CreateReceiptPayload {
+  supplier_name: string;
+  note?: string;
+  items: { sku_id: string; quantity: number; cost_price: number }[];
+}
+
+export interface AdjustStockPayload {
+  sku_id: string;
+  quantity_delta: number;
+  reason: string;
+}
+
+export interface AdjustStockResult {
+  adjustment_code: string;
+  stock: { sku_id: string; warehouse_id: string; on_hand: number; reserved: number };
+}
+
+export interface ReconcileStockResult {
+  checked: number;
+  drifts: { sku_id: string; redis_before: number | null; expected: number }[];
 }

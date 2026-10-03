@@ -32,15 +32,22 @@ import {
   ArrowRight,
   ShieldCheck,
   FileText,
+  Undo2,
+  PackageX,
+  RotateCw,
 } from 'lucide-react';
 import { orderService } from '@/services/orderService';
 import { ApiOrderDto } from '@/types/ecommerce';
 import { Tooltip } from '@/components/Tooltip';
 import { ResizableDrawer } from '@/components/ResizableDrawer';
 
-type StatusFilter = 'ALL' | 'PENDING' | 'CONFIRMED' | 'SHIPPING' | 'DELIVERED' | 'CANCELLED';
+type StatusFilter = 'ALL' | 'PENDING' | 'CONFIRMED' | 'SHIPPING' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
 type PaymentMethodFilter = 'ALL' | 'COD' | 'VNPAY';
 type PaymentStatusFilter = 'ALL' | 'PAID' | 'UNPAID';
+
+/** Đơn đã xuất kho mà khách không nhận / trả lại → có thể nhận hàng hoàn nhập lại kho */
+const canReceiveReturn = (order: ApiOrderDto) =>
+  order.order_status === 'DELIVERED' || (order.order_status === 'CANCELLED' && Boolean(order.shipped_at));
 
 const CARRIERS = [
   { id: 'GHN', name: 'Giao Hàng Nhanh (GHN)', prefix: 'GHN' },
@@ -82,6 +89,10 @@ export default function AdminOrdersPage() {
   // Modal 3: Hủy đơn hàng
   const [cancelModalOrder, setCancelModalOrder] = useState<ApiOrderDto | null>(null);
   const [cancelReason, setCancelReason] = useState('Khách hàng yêu cầu hủy qua hotline');
+
+  // Modal 4: Nhận hàng hoàn về kho (→ RETURNED, nhập lại tồn kho)
+  const [returnModalOrder, setReturnModalOrder] = useState<ApiOrderDto | null>(null);
+  const [returnNote, setReturnNote] = useState('');
 
   const fetchOrders = async () => {
     setIsLoading(true);
@@ -183,6 +194,17 @@ export default function AdminOrdersPage() {
           badge: 'Đã xác nhận',
           badgeClass: 'bg-blue-500/10 text-blue-400 border border-blue-500/20',
         };
+      case 'RETURNED':
+        return {
+          title: 'Đã nhận lại hàng hoàn',
+          subtitle: hist.note || 'Kho đã nhận lại hàng hoàn và nhập lại tồn kho',
+          dotColor: 'bg-violet-400',
+          dotRing: 'ring-violet-400 bg-violet-500/30',
+          pingColor: 'bg-violet-500/20',
+          borderDot: 'border-violet-400/80',
+          badge: 'Đã hoàn hàng',
+          badgeClass: 'bg-violet-500/10 text-violet-400 border border-violet-500/20',
+        };
       case 'CANCELLED':
         return {
           title: 'Đơn hàng đã bị hủy',
@@ -236,6 +258,8 @@ export default function AdminOrdersPage() {
       shipping: orders.filter((o) => o.order_status === 'SHIPPING').length,
       delivered: orders.filter((o) => o.order_status === 'DELIVERED').length,
       cancelled: orders.filter((o) => o.order_status === 'CANCELLED').length,
+      returned: orders.filter((o) => o.order_status === 'RETURNED').length,
+      stockSyncIssues: orders.filter((o) => o.stock_sync_status === 'FAILED').length,
     };
   }, [orders]);
 
@@ -459,21 +483,77 @@ export default function AdminOrdersPage() {
       });
       if (res.success) {
         setFeedbackMessage({
-          text: `Đã hủy đơn hàng [${cancelModalOrder.order_code}] (SAGA đã hoàn trả kho hàng)`,
+          text:
+            cancelModalOrder.order_status === 'SHIPPING'
+              ? `Đã ghi nhận giao thất bại đơn [${cancelModalOrder.order_code}] — bấm "Nhận hàng hoàn" khi hàng về kho`
+              : `Đã hủy đơn hàng [${cancelModalOrder.order_code}] và nhả hàng đã giữ trong kho`,
           type: 'success',
         });
-        const updatedId = cancelModalOrder.id;
         setCancelModalOrder(null);
-        await fetchOrders();
-        if (detailDrawerOrder?.id === updatedId) {
-          setDetailDrawerOrder((prev) => (prev ? { ...prev, order_status: 'CANCELLED' } : null));
-        }
+        await refreshAfterAction(res.order);
       } else {
         setFeedbackMessage({ text: res.message || 'Hủy thất bại', type: 'error' });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Lỗi kết nối';
       setFeedbackMessage({ text: msg, type: 'error' });
+    } finally {
+      setProcessingOrderId(null);
+    }
+  };
+
+  // Sau mỗi thao tác: nạp lại danh sách và cập nhật Drawer nếu đang xem đúng đơn đó
+  const refreshAfterAction = async (updated?: ApiOrderDto) => {
+    await fetchOrders();
+    if (updated) {
+      setDetailDrawerOrder((prev) => (prev && prev.id === updated.id ? updated : prev));
+    }
+  };
+
+  // 6. Hành động: Nhận hàng hoàn về kho (DELIVERED / giao thất bại → RETURNED)
+  const handleReceiveReturn = async () => {
+    if (!returnModalOrder) return;
+    setProcessingOrderId(returnModalOrder.id);
+    try {
+      const res = await orderService.updateDeliveryStatus(returnModalOrder.id, {
+        new_status: 'RETURNED',
+        note: returnNote.trim() || undefined,
+        location: 'Kho tổng Novatech Logistics',
+      });
+      if (res.success) {
+        setFeedbackMessage({
+          text: `Đã nhận hàng hoàn đơn [${returnModalOrder.order_code}] và nhập lại tồn kho`,
+          type: 'success',
+        });
+        setReturnModalOrder(null);
+        await refreshAfterAction(res.order);
+      } else {
+        setFeedbackMessage({ text: res.message || 'Nhận hàng hoàn thất bại', type: 'error' });
+      }
+    } finally {
+      setProcessingOrderId(null);
+    }
+  };
+
+  // 7. Hành động: Thử lại đồng bộ kho cho đơn có thao tác kho đang chờ / thất bại
+  const handleRetryStockSync = async (order: ApiOrderDto) => {
+    setProcessingOrderId(order.id);
+    try {
+      const res = await orderService.retryStockSync(order.id);
+      if (res.success && res.stock_sync_status === 'OK') {
+        setFeedbackMessage({ text: `Đã đồng bộ kho thành công cho đơn [${order.order_code}]`, type: 'success' });
+      } else {
+        setFeedbackMessage({
+          text: res.stock_sync_error || res.message || 'Đồng bộ kho vẫn chưa thành công',
+          type: 'error',
+        });
+      }
+      await fetchOrders();
+      setDetailDrawerOrder((prev) =>
+        prev && prev.id === order.id
+          ? { ...prev, stock_sync_status: res.stock_sync_status ?? prev.stock_sync_status, stock_sync_error: res.stock_sync_error }
+          : prev
+      );
     } finally {
       setProcessingOrderId(null);
     }
@@ -528,6 +608,7 @@ export default function AdminOrdersPage() {
                 { id: 'SHIPPING', label: 'Đang vận chuyển', count: stats.shipping },
                 { id: 'DELIVERED', label: 'Giao thành công', count: stats.delivered },
                 { id: 'CANCELLED', label: 'Đã hủy', count: stats.cancelled },
+                { id: 'RETURNED', label: 'Đã hoàn hàng', count: stats.returned },
               ] as const
             ).map((tab) => (
               <button
@@ -840,6 +921,28 @@ export default function AdminOrdersPage() {
                               Đã hủy
                             </span>
                           )}
+                          {order.order_status === 'RETURNED' && (
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                              <Undo2 className="w-3 h-3 text-violet-400" />
+                              Đã hoàn hàng
+                            </span>
+                          )}
+                          {order.stock_sync_status === 'PENDING' && (
+                            <Tooltip content="Thao tác kho đang chờ đồng bộ, hệ thống sẽ tự thử lại">
+                              <span className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                                Kho đang đồng bộ
+                              </span>
+                            </Tooltip>
+                          )}
+                          {order.stock_sync_status === 'FAILED' && (
+                            <Tooltip content={order.stock_sync_error || 'Đồng bộ kho thất bại, cần xử lý thủ công'}>
+                              <span className="mt-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                                <AlertCircle className="w-3 h-3" />
+                                Lỗi đồng bộ kho
+                              </span>
+                            </Tooltip>
+                          )}
                         </div>
                       </td>
 
@@ -960,7 +1063,54 @@ export default function AdminOrdersPage() {
                                   )}
                                 </button>
                               </Tooltip>
+
+                              <Tooltip content="Giao thất bại (hàng hoàn về kho)">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCancelModalOrder(order);
+                                    setCancelReason('Giao hàng thất bại, khách không nhận hàng');
+                                  }}
+                                  disabled={isProcessing}
+                                  className="p-2 rounded-lg border border-rose-500/30 hover:bg-rose-500/10 text-rose-400 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                                >
+                                  <PackageX className="w-3.5 h-3.5" />
+                                </button>
+                              </Tooltip>
                             </>
+                          )}
+
+                          {canReceiveReturn(order) && (
+                            <Tooltip content="Nhận hàng hoàn về kho">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setReturnModalOrder(order);
+                                  setReturnNote('');
+                                }}
+                                disabled={isProcessing}
+                                className="p-2 rounded-lg border border-violet-500/30 hover:bg-violet-500/10 text-violet-300 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                              >
+                                <Undo2 className="w-3.5 h-3.5" />
+                              </button>
+                            </Tooltip>
+                          )}
+
+                          {(order.stock_sync_status === 'FAILED' || order.stock_sync_status === 'PENDING') && (
+                            <Tooltip content="Thử lại đồng bộ kho">
+                              <button
+                                type="button"
+                                onClick={() => handleRetryStockSync(order)}
+                                disabled={isProcessing}
+                                className="p-2 rounded-lg border border-amber-500/30 hover:bg-amber-500/10 text-amber-300 transition-all disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                              >
+                                {isProcessing ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <RotateCw className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            </Tooltip>
                           )}
                         </div>
                       </td>
@@ -1103,10 +1253,66 @@ export default function AdminOrdersPage() {
                     <span>Giao thành công</span>
                   </button>
                 )}
+
+                {canReceiveReturn(detailDrawerOrder) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReturnModalOrder(detailDrawerOrder);
+                      setReturnNote('');
+                    }}
+                    className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-md shadow-violet-600/30 cursor-pointer"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                    <span>Nhận hàng hoàn</span>
+                  </button>
+                )}
               </div>
             </div>
           }
         >
+                {/* Cảnh báo đồng bộ kho */}
+                {(detailDrawerOrder.stock_sync_status === 'FAILED' || detailDrawerOrder.stock_sync_status === 'PENDING') && (
+                  <div
+                    className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl border text-xs ${
+                      detailDrawerOrder.stock_sync_status === 'FAILED'
+                        ? 'bg-rose-950/40 border-rose-800/60 text-rose-200'
+                        : 'bg-amber-950/30 border-amber-800/50 text-amber-200'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5 min-w-0">
+                      <AlertCircle
+                        className={`w-4 h-4 shrink-0 mt-0.5 ${
+                          detailDrawerOrder.stock_sync_status === 'FAILED' ? 'text-rose-400' : 'text-amber-400'
+                        }`}
+                      />
+                      <div className="space-y-0.5 min-w-0">
+                        <p className="font-bold">
+                          {detailDrawerOrder.stock_sync_status === 'FAILED'
+                            ? 'Đồng bộ kho thất bại — cần xử lý thủ công'
+                            : 'Thao tác kho đang chờ đồng bộ, hệ thống sẽ tự thử lại'}
+                        </p>
+                        {detailDrawerOrder.stock_sync_error && (
+                          <p className="text-[11px] opacity-80 break-words">{detailDrawerOrder.stock_sync_error}</p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRetryStockSync(detailDrawerOrder)}
+                      disabled={processingOrderId === detailDrawerOrder.id}
+                      className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-white font-semibold flex items-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed active:scale-95"
+                    >
+                      {processingOrderId === detailDrawerOrder.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RotateCw className="w-3.5 h-3.5" />
+                      )}
+                      Thử lại đồng bộ kho
+                    </button>
+                  </div>
+                )}
+
                 {/* Khách hàng & Địa chỉ */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs bg-slate-950/70 p-4 rounded-2xl border border-slate-800/80">
                   <div className="space-y-1.5">
@@ -1529,7 +1735,9 @@ export default function AdminOrdersPage() {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2 text-rose-400">
                 <Ban className="w-5 h-5" />
-                <h3 className="text-base font-bold text-white">Xác Nhận Hủy Đơn Hàng</h3>
+                <h3 className="text-base font-bold text-white">
+                  {cancelModalOrder.order_status === 'SHIPPING' ? 'Ghi Nhận Giao Thất Bại' : 'Xác Nhận Hủy Đơn Hàng'}
+                </h3>
               </div>
               <button
                 type="button"
@@ -1542,16 +1750,22 @@ export default function AdminOrdersPage() {
 
             <div className="text-xs space-y-2 text-slate-300">
               <p>
-                Bạn có chắc chắn muốn hủy đơn hàng mã{' '}
+                {cancelModalOrder.order_status === 'SHIPPING'
+                  ? 'Ghi nhận giao thất bại cho đơn hàng mã'
+                  : 'Bạn có chắc chắn muốn hủy đơn hàng mã'}{' '}
                 <span className="font-mono font-bold text-rose-400">{cancelModalOrder.order_code}</span>?
               </p>
               <p className="text-amber-400 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20 text-[11px]">
-                Toàn bộ số lượng tồn kho đã giữ (Reservation) sẽ được tự động giải phóng và trả lại kho hàng qua cơ chế SAGA bù trừ.
+                {cancelModalOrder.order_status === 'SHIPPING'
+                  ? 'Hàng đã xuất kho nên tồn kho chưa thay đổi. Khi hàng về tới kho, bấm "Nhận hàng hoàn" để nhập lại tồn.'
+                  : 'Số lượng đã giữ / đã chốt cho đơn này sẽ được nhả lại thành hàng còn bán được.'}
               </p>
             </div>
 
             <div className="space-y-1.5 text-xs">
-              <label className="font-bold text-slate-300 block">Lý do hủy đơn</label>
+              <label className="font-bold text-slate-300 block">
+                {cancelModalOrder.order_status === 'SHIPPING' ? 'Lý do giao thất bại' : 'Lý do hủy đơn'}
+              </label>
               <textarea
                 rows={3}
                 value={cancelReason}
@@ -1579,7 +1793,84 @@ export default function AdminOrdersPage() {
                 ) : (
                   <Ban className="w-4 h-4" />
                 )}
-                Xác Nhận Hủy Đơn
+                {cancelModalOrder.order_status === 'SHIPPING' ? 'Xác Nhận Giao Thất Bại' : 'Xác Nhận Hủy Đơn'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL 4: NHẬN HÀNG HOÀN VỀ KHO (NHẬP LẠI TỒN KHO)              */}
+      {/* ============================================================== */}
+      {returnModalOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-[#0F172A] rounded-3xl max-w-md w-full p-6 sm:p-8 space-y-5 shadow-2xl border border-violet-900/40 text-white">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2 text-violet-400">
+                <Undo2 className="w-5 h-5" />
+                <h3 className="text-base font-bold text-white">Nhận Hàng Hoàn Về Kho</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReturnModalOrder(null)}
+                className="text-slate-400 hover:text-white p-1 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="text-xs space-y-2 text-slate-300">
+              <p>
+                Xác nhận kho đã nhận lại đầy đủ hàng của đơn{' '}
+                <span className="font-mono font-bold text-violet-400">{returnModalOrder.order_code}</span>:
+              </p>
+              <ul className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-1">
+                {returnModalOrder.items?.map((item) => (
+                  <li key={item.id} className="flex justify-between gap-3">
+                    <span className="truncate">
+                      {item.product_name} <span className="text-slate-500">({item.sku_name})</span>
+                    </span>
+                    <span className="font-bold text-white shrink-0">× {item.quantity}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-amber-400 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20 text-[11px]">
+                Toàn bộ số lượng trên sẽ được cộng lại vào tồn thực tế và ghi sổ kho loại RETURN. Hàng hỏng không nhập lại được cần điều chỉnh kiểm kê ở trang Quản Lý Kho.
+              </p>
+            </div>
+
+            <div className="space-y-1.5 text-xs">
+              <label className="font-bold text-slate-300 block">Ghi chú (không bắt buộc)</label>
+              <textarea
+                rows={2}
+                value={returnNote}
+                placeholder="Ví dụ: Hàng nguyên seal, khách từ chối nhận"
+                onChange={(e) => setReturnNote(e.target.value)}
+                className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white focus:ring-2 focus:ring-violet-500/30"
+              />
+            </div>
+
+            <div className="pt-3 flex items-center justify-end gap-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setReturnModalOrder(null)}
+                className="px-4 py-2 rounded-xl border border-slate-800 text-slate-400 text-xs font-semibold hover:bg-slate-800 hover:text-white cursor-pointer"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                onClick={handleReceiveReturn}
+                disabled={processingOrderId === returnModalOrder.id}
+                className="px-5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold shadow-md shadow-violet-600/30 flex items-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+              >
+                {processingOrderId === returnModalOrder.id ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Undo2 className="w-4 h-4" />
+                )}
+                Xác Nhận Nhập Lại Kho
               </button>
             </div>
           </div>

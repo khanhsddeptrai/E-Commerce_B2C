@@ -1,4 +1,4 @@
-import { ApiOrderDto, CreateOrderPayload } from "@/types/ecommerce";
+import { ApiOrderDto, CreateOrderPayload, StockSyncStatus } from "@/types/ecommerce";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_GATEWAY_URL || "http://localhost:8000/api/v1";
 
@@ -127,12 +127,38 @@ export const orderService = {
       });
       const data = await res.json();
       return {
-        success: Boolean(data.success),
-        message: data.message || "",
+        success: res.ok && Boolean(data.success),
+        // Lỗi từ backend (vd 409 chuyển trạng thái không hợp lệ) trả về message dạng chuỗi hoặc mảng (lỗi validate)
+        message: Array.isArray(data.message) ? data.message.join(", ") : data.message || "",
         order: data.order as ApiOrderDto | undefined,
       };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Lỗi kết nối khi cập nhật vận chuyển";
+      return { success: false, message: msg };
+    }
+  },
+
+  /** Admin thử lại các thao tác kho đang chờ / thất bại của đơn */
+  async retryStockSync(orderId: string): Promise<{
+    success: boolean;
+    message: string;
+    stock_sync_status?: StockSyncStatus;
+    stock_sync_error?: string;
+  }> {
+    try {
+      const res = await fetch(`${API_BASE_URL}/orders/${encodeURIComponent(orderId)}/retry-stock-sync`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      return {
+        success: res.ok && Boolean(data.success),
+        message: Array.isArray(data.message) ? data.message.join(", ") : data.message || "",
+        stock_sync_status: data.stock_sync_status as StockSyncStatus | undefined,
+        stock_sync_error: data.stock_sync_error as string | undefined,
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Lỗi kết nối khi thử lại đồng bộ kho";
       return { success: false, message: msg };
     }
   },
