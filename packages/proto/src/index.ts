@@ -3,14 +3,9 @@ import * as fs from 'fs';
 import { Observable } from 'rxjs';
 
 function getProtoPath(filename: string): string {
-  let baseDir = '';
-  try {
-    // @ts-ignore
-    baseDir = __dirname;
-  } catch {
-    // @ts-ignore
-    baseDir = import.meta.dirname || '';
-  }
+  // CommonJS có __dirname; môi trường ESM không có thì để trống và dò theo process.cwd() bên dưới.
+  // Không dùng import.meta: cú pháp chỉ hợp lệ trong ESM, làm Jest (CommonJS) không nạp được file này.
+  const baseDir = typeof __dirname !== 'undefined' ? __dirname : '';
 
   const candidates = [
     path.resolve(baseDir, filename),
@@ -599,6 +594,19 @@ export interface OrderStatusHistoryDto {
   created_at: string;
 }
 
+export type StockSyncStatusValue = 'OK' | 'PENDING' | 'FAILED';
+
+export interface RetryStockSyncRequest {
+  order_id: string;
+}
+
+export interface RetryStockSyncResponse {
+  success: boolean;
+  message: string;
+  stock_sync_status: StockSyncStatusValue;
+  stock_sync_error?: string;
+}
+
 export interface OrderDto {
   id: string;
   order_code: string;
@@ -625,6 +633,8 @@ export interface OrderDto {
   shipped_at?: string;
   delivered_at?: string;
   status_history?: OrderStatusHistoryDto[];
+  stock_sync_status?: StockSyncStatusValue;
+  stock_sync_error?: string;
 }
 
 export interface CreateOrderResponse {
@@ -688,6 +698,7 @@ export interface OrderServiceClient {
   processPaymentSuccess(request: ProcessPaymentSuccessRequest): Observable<ProcessPaymentSuccessResponse>;
   processPaymentFailed(request: ProcessPaymentFailedRequest): Observable<ProcessPaymentFailedResponse>;
   updateDeliveryStatus(request: UpdateDeliveryStatusRequest): Observable<UpdateDeliveryStatusResponse>;
+  retryStockSync(request: RetryStockSyncRequest): Observable<RetryStockSyncResponse>;
 }
 
 export interface ProcessPaymentSuccessRequest {

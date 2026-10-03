@@ -10,6 +10,19 @@ service OrderService {
   rpc ProcessPaymentSuccess (ProcessPaymentSuccessRequest) returns (ProcessPaymentSuccessResponse);
   rpc ProcessPaymentFailed (ProcessPaymentFailedRequest) returns (ProcessPaymentFailedResponse);
   rpc UpdateDeliveryStatus (UpdateDeliveryStatusRequest) returns (UpdateDeliveryStatusResponse);
+  rpc RetryStockSync (RetryStockSyncRequest) returns (RetryStockSyncResponse);
+}
+
+// Admin thử lại các thao tác kho đã thất bại của một đơn
+message RetryStockSyncRequest {
+  string order_id = 1;
+}
+
+message RetryStockSyncResponse {
+  bool success = 1;
+  string message = 2;
+  string stock_sync_status = 3;
+  optional string stock_sync_error = 4;
 }
 
 message OrderItemInputDto {
@@ -77,6 +90,8 @@ message OrderDto {
   optional string shipped_at = 23;
   optional string delivered_at = 24;
   repeated OrderStatusHistoryDto status_history = 25;
+  optional string stock_sync_status = 26; // OK | PENDING | FAILED – trạng thái đồng bộ thao tác kho
+  optional string stock_sync_error = 27;  // Lỗi gần nhất khi đồng bộ kho thất bại
 }
 
 message CreateOrderResponse {

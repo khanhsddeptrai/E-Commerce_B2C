@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
 import Redis from 'ioredis';
@@ -43,7 +43,7 @@ type OrderWithItems = OrderPrisma.Prisma.OrderGetPayload<{
 };
 
 @Injectable()
-export class OrderService {
+export class OrderService implements OnModuleDestroy {
   private readonly redis: Redis;
   private readonly productPrisma: ProductPrismaClient;
 
@@ -62,6 +62,11 @@ export class OrderService {
         },
       },
     });
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    this.redis.disconnect();
+    await this.productPrisma.$disconnect();
   }
 
   /**

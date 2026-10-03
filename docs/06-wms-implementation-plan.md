@@ -149,6 +149,26 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - Thêm trạng thái đơn hỗ trợ xuất kho/hàng hoàn nếu cần (vd `RETURNED`), cập nhật `order.proto`.
 - Gỡ bảng `inventory_reservations` khỏi `order_db` (migration riêng, sau khi backfill đã chạy).
 - Test lại toàn luồng: COD, VNPAY thành công/thất bại, hết hạn, hủy, giao thất bại → hàng hoàn.
+- **Thiết kế đã chốt (2026-10-03):**
+
+  | Thao tác trên đơn | Trạng thái đơn | Thao tác kho |
+  |---|---|---|
+  | Tạo đơn VNPAY | → PENDING | `HoldStock` đồng bộ trước khi ghi đơn |
+  | Tạo đơn COD | → CONFIRMED | `HoldStock` đồng bộ + task `COMMIT` *(giữ trước rồi chốt: ghi đơn lỗi thì HOLD tự hết hạn, không còn lượt chốt "mồ côi")* |
+  | Thanh toán thành công | PENDING → CONFIRMED | task `COMMIT` |
+  | Thanh toán thành công khi đơn đã bị hủy do quá hạn | CANCELLED → CONFIRMED | task `COMMIT` (giữ lại hàng; hết hàng → `FAILED` để admin liên hệ / hoàn tiền) |
+  | Thanh toán thất bại / khách hủy / quá hạn 15 phút | → CANCELLED | task `RELEASE` |
+  | Admin xác nhận đơn chưa thanh toán | PENDING → CONFIRMED | task `COMMIT` (sửa lỗi #4) |
+  | Bàn giao shipper / webhook `PICKED_UP` | CONFIRMED → SHIPPING | task `SHIP` |
+  | Giao thành công | → DELIVERED | – |
+  | Giao thất bại (đang giao) | SHIPPING → CANCELLED | – (hàng chưa về kho – sửa lỗi #5) |
+  | Admin xác nhận đã nhận hàng hoàn | CANCELLED (đã giao) / DELIVERED → RETURNED | task `RETURN` |
+
+  - `StockSyncWorker` 30 giây/lần; task cùng đơn chạy tuần tự; mỗi lần xử lý "nhận" task bằng cập nhật có điều kiện (lease) để không chạy trùng; lỗi tạm thời (mất kết nối, timeout) thử lại với backoff 30 giây → tối đa 10 phút, quá 20 lần → `FAILED`; lỗi nghiệp vụ (hết hàng, sai trạng thái) → `FAILED` ngay. Task `FAILED` chặn các task sau của cùng đơn cho tới khi admin bấm thử lại (RPC `RetryStockSync`).
+  - `OrderDto` thêm `stock_sync_status` (`OK`/`PENDING`/`FAILED`) + `stock_sync_error`.
+  - Chia: **3a** migration + gRPC client + thực thi task + worker; **3b** nối lại các luồng, bỏ code kho cũ; **3c** chuyển đổi trên dữ liệu dev cùng người dùng (tắt service → backup → migrate → backfill → bật service → soát số liệu).
+  - **3a ✅** *(2026-10-03)* — Migration `add_stock_sync_tasks` (cột `seq` tự tăng để xếp thứ tự task tạo cùng transaction; chưa áp dụng lên dev, để 3c), gRPC client `InventoryService` (`PRODUCT_GRPC_URL`), `StockSyncService` + `StockSyncWorker`, `OrderDto.stock_sync_status/error`, RPC `RetryStockSync`; 14 test (DB riêng `order_db_ordersvc_test`).
+    - *Phát sinh: bỏ `import.meta` trong `getProtoPath` (`packages/proto`) vì Jest không nạp được; thêm đóng kết nối Redis / ProductPrismaClient khi `OrderService` / `ExpiredOrderWorker` tắt (lỗi có sẵn làm Jest không thoát – sẽ bỏ hẳn ở 3b).*
 
 ### Bước 4 — API Gateway & giao diện Admin
 - Endpoint REST cho kho (có phân trang theo quy chuẩn `items/total/page/limit`), chỉ `ADMIN`.

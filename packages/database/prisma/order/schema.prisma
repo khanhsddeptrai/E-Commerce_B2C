@@ -39,58 +39,59 @@ enum ReservationStatus {
 }
 
 model Order {
-  id              String         @id @default(uuid()) @db.Uuid
-  orderCode       String         @unique @map("order_code") @db.VarChar(50)
-  customerId      String         @map("customer_id") @db.Uuid
-  customerName    String         @map("customer_name") @db.VarChar(150)
-  customerPhone   String         @map("customer_phone") @db.VarChar(20)
-  customerEmail   String         @map("customer_email") @db.VarChar(255)
-  shippingAddress Json           @map("shipping_address") @db.JsonB
-  subtotalAmount  Decimal        @map("subtotal_amount") @db.Decimal(15, 2)
-  discountAmount  Decimal        @default(0) @map("discount_amount") @db.Decimal(15, 2)
-  shippingFee     Decimal        @default(0) @map("shipping_fee") @db.Decimal(15, 2)
-  totalAmount     Decimal        @map("total_amount") @db.Decimal(15, 2)
-  paymentMethod   PaymentMethod  @default(COD) @map("payment_method")
-  paymentStatus   PaymentStatus  @default(PENDING) @map("payment_status")
-  orderStatus     OrderStatus    @default(PENDING) @map("order_status")
-  voucherCode     String?        @map("voucher_code") @db.VarChar(50)
-  cancelReason    String?        @map("cancel_reason") @db.Text
-  note            String?        @db.Text
-  trackingCode    String?        @map("tracking_code") @db.VarChar(100)
-  carrierName     String?        @map("carrier_name") @db.VarChar(100)
-  shippingMethod  String         @default("STANDARD") @map("shipping_method") @db.VarChar(50)
-  shippedAt       DateTime?      @map("shipped_at")
-  deliveredAt     DateTime?      @map("delivered_at")
-  createdAt       DateTime       @default(now()) @map("created_at")
-  updatedAt       DateTime       @updatedAt @map("updated_at")
+  id              String        @id @default(uuid()) @db.Uuid
+  orderCode       String        @unique @map("order_code") @db.VarChar(50)
+  customerId      String        @map("customer_id") @db.Uuid
+  customerName    String        @map("customer_name") @db.VarChar(150)
+  customerPhone   String        @map("customer_phone") @db.VarChar(20)
+  customerEmail   String        @map("customer_email") @db.VarChar(255)
+  shippingAddress Json          @map("shipping_address") @db.JsonB
+  subtotalAmount  Decimal       @map("subtotal_amount") @db.Decimal(15, 2)
+  discountAmount  Decimal       @default(0) @map("discount_amount") @db.Decimal(15, 2)
+  shippingFee     Decimal       @default(0) @map("shipping_fee") @db.Decimal(15, 2)
+  totalAmount     Decimal       @map("total_amount") @db.Decimal(15, 2)
+  paymentMethod   PaymentMethod @default(COD) @map("payment_method")
+  paymentStatus   PaymentStatus @default(PENDING) @map("payment_status")
+  orderStatus     OrderStatus   @default(PENDING) @map("order_status")
+  voucherCode     String?       @map("voucher_code") @db.VarChar(50)
+  cancelReason    String?       @map("cancel_reason") @db.Text
+  note            String?       @db.Text
+  trackingCode    String?       @map("tracking_code") @db.VarChar(100)
+  carrierName     String?       @map("carrier_name") @db.VarChar(100)
+  shippingMethod  String        @default("STANDARD") @map("shipping_method") @db.VarChar(50)
+  shippedAt       DateTime?     @map("shipped_at")
+  deliveredAt     DateTime?     @map("delivered_at")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
-  items           OrderItem[]
-  statusHistory   OrderStatusHistory[]
-  reservations    InventoryReservation[]
+  items          OrderItem[]
+  statusHistory  OrderStatusHistory[]
+  reservations   InventoryReservation[] // Mô hình cũ – chỉ còn để backfill đọc, xóa ở Bước 5 (WMS)
+  stockSyncTasks StockSyncTask[]
 
-  @@map("orders")
   @@index([customerId])
   @@index([createdAt])
   @@index([orderStatus])
+  @@map("orders")
 }
 
 model OrderItem {
-  id           String   @id @default(uuid()) @db.Uuid
-  orderId      String   @map("order_id") @db.Uuid
-  skuId        String   @map("sku_id") @db.Uuid
-  productId    String   @map("product_id") @db.Uuid
-  productName  String   @map("product_name") @db.VarChar(255)
-  skuName      String   @map("sku_name") @db.VarChar(255)
-  unitPrice    Decimal  @map("unit_price") @db.Decimal(15, 2)
-  quantity     Int      @map("quantity")
-  totalPrice   Decimal  @map("total_price") @db.Decimal(15, 2)
-  thumbnailUrl String?  @map("thumbnail_url") @db.Text
+  id           String  @id @default(uuid()) @db.Uuid
+  orderId      String  @map("order_id") @db.Uuid
+  skuId        String  @map("sku_id") @db.Uuid
+  productId    String  @map("product_id") @db.Uuid
+  productName  String  @map("product_name") @db.VarChar(255)
+  skuName      String  @map("sku_name") @db.VarChar(255)
+  unitPrice    Decimal @map("unit_price") @db.Decimal(15, 2)
+  quantity     Int     @map("quantity")
+  totalPrice   Decimal @map("total_price") @db.Decimal(15, 2)
+  thumbnailUrl String? @map("thumbnail_url") @db.Text
 
-  order        Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  @@map("order_items")
   @@index([orderId])
   @@index([skuId])
+  @@map("order_items")
 }
 
 model OrderStatusHistory {
@@ -103,10 +104,10 @@ model OrderStatusHistory {
   changedBy  String   @map("changed_by") @db.VarChar(100)
   createdAt  DateTime @default(now()) @map("created_at")
 
-  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  @@map("order_status_history")
   @@index([orderId])
+  @@map("order_status_history")
 }
 
 model InventoryReservation {
@@ -118,10 +119,47 @@ model InventoryReservation {
   expiresAt DateTime?         @map("expires_at")
   createdAt DateTime          @default(now()) @map("created_at")
 
-  order     Order?            @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
-  @@map("inventory_reservations")
   @@index([orderId])
   @@index([skuId])
   @@index([status, expiresAt])
+  @@map("inventory_reservations")
+}
+
+// ---------- Đồng bộ thao tác kho với Product Service (WMS – docs/06 mục 5.1) ----------
+
+enum StockSyncAction {
+  COMMIT // Chốt hàng cho đơn (HOLD → COMMITTED)
+  RELEASE // Nhả hàng (đơn hủy trước khi xuất kho)
+  SHIP // Xuất kho
+  RETURN // Nhận lại hàng hoàn
+}
+
+enum StockSyncStatus {
+  PENDING
+  DONE
+  FAILED
+}
+
+// Ý định thao tác kho, ghi CÙNG transaction với thay đổi trạng thái đơn; StockSyncWorker gọi RPC kho và thử lại tới khi xong
+model StockSyncTask {
+  id          String          @id @default(uuid()) @db.Uuid
+  seq         Int             @unique @default(autoincrement()) // Thứ tự xử lý chắc chắn (created_at có thể trùng trong cùng transaction)
+  orderId     String          @map("order_id") @db.Uuid
+  action      StockSyncAction
+  status      StockSyncStatus @default(PENDING)
+  attempts    Int             @default(0)
+  nextRetryAt DateTime        @default(now()) @map("next_retry_at")
+  lastError   String?         @map("last_error") @db.Text
+  performedBy String          @map("performed_by") @db.VarChar(100)
+  payload     Json?           @db.JsonB // vd nhận hàng hoàn một phần: { items, note }
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextRetryAt])
+  @@index([orderId, seq])
+  @@map("stock_sync_tasks")
 }

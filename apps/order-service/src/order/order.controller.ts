@@ -16,11 +16,17 @@ import {
   ProcessPaymentFailedResponse,
   UpdateDeliveryStatusRequest,
   UpdateDeliveryStatusResponse,
+  RetryStockSyncRequest,
+  RetryStockSyncResponse,
 } from '@repo/proto';
+import { StockSyncService } from '../stock-sync/stock-sync.service';
 
 @Controller()
 export class OrderController {
-  constructor(private readonly orderService: OrderService) {}
+  constructor(
+    private readonly orderService: OrderService,
+    private readonly stockSync: StockSyncService,
+  ) {}
 
   @GrpcMethod('OrderService', 'CreateOrder')
   async createOrder(data: CreateOrderRequest): Promise<CreateOrderResponse> {
@@ -55,6 +61,22 @@ export class OrderController {
   @GrpcMethod('OrderService', 'UpdateDeliveryStatus')
   async updateDeliveryStatus(data: UpdateDeliveryStatusRequest): Promise<UpdateDeliveryStatusResponse> {
     return this.orderService.updateDeliveryStatus(data);
+  }
+
+  @GrpcMethod('OrderService', 'RetryStockSync')
+  async retryStockSync(data: RetryStockSyncRequest): Promise<RetryStockSyncResponse> {
+    const state = await this.stockSync.retryOrder(data.order_id);
+    return {
+      success: state.status !== 'FAILED',
+      message:
+        state.status === 'OK'
+          ? 'Đồng bộ kho thành công'
+          : state.status === 'PENDING'
+            ? 'Đang chờ đồng bộ kho, hệ thống sẽ tự thử lại'
+            : 'Đồng bộ kho vẫn thất bại',
+      stock_sync_status: state.status,
+      stock_sync_error: state.error,
+    };
   }
 }
 

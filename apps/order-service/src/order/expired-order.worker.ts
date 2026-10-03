@@ -36,12 +36,13 @@ export class ExpiredOrderWorker implements OnModuleInit, OnModuleDestroy {
     }, 30000);
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
     this.redis.disconnect();
+    await this.productPrisma.$disconnect();
   }
 
   /**

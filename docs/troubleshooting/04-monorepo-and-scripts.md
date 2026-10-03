@@ -57,16 +57,8 @@ Trong các phiên bản Node.js hiện đại (Node 20.12+ và Node 22+), khi m�
 Trong file [packages/proto/src/index.ts](file:///d:/MyProject/E-Commerce_B2C/packages/proto/src/index.ts), sử dụng hàm bọc helper `getProtoPath()` có cơ chế fallback kép:
 ```typescript
 function getProtoPath(filename: string): string {
-  let baseDir = '';
-  try {
-    // Thử dùng __dirname nếu chạy dưới môi trường CommonJS
-    // @ts-ignore
-    baseDir = __dirname;
-  } catch {
-    // Fallback sang import.meta.dirname của Node 20.11+ / Node 22+ ESM
-    // @ts-ignore
-    baseDir = import.meta.dirname || '';
-  }
+  // CommonJS có __dirname; môi trường ESM không có thì để trống và dò theo process.cwd() bên dưới
+  const baseDir = typeof __dirname !== 'undefined' ? __dirname : '';
 
   const candidates = [
     path.resolve(baseDir, filename),
@@ -83,3 +75,5 @@ function getProtoPath(filename: string): string {
 }
 ```
 *Giải pháp này đảm bảo mã nguồn chạy ổn định trên cả môi trường CommonJS (`ts-node`), ESM (`node --loader`) và Next.js bundler.*
+
+> **Cập nhật 2026-10-03:** Phiên bản cũ dùng `try { __dirname } catch { import.meta.dirname }`. Cú pháp `import.meta` chỉ hợp lệ trong ESM nên Jest (chạy CommonJS) báo `Must use import to load ES Module` khi test nạp `@repo/proto`. Đã thay bằng `typeof __dirname !== 'undefined'`; môi trường ESM vẫn tìm được file `.proto` qua các đường dẫn dự phòng theo `process.cwd()`.
