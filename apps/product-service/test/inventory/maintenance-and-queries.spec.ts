@@ -4,7 +4,6 @@ import { status } from '@grpc/grpc-js';
 import { CatalogService } from '../../src/catalog/catalog.service';
 import { InventoryQueryService } from '../../src/inventory/inventory-query.service';
 import { InventoryService } from '../../src/inventory/inventory.service';
-import { StockMaintenanceWorker } from '../../src/inventory/stock-maintenance.worker';
 import { PrismaProductService } from '../../src/prisma/prisma-product.service';
 import {
   createCategory,
@@ -119,15 +118,6 @@ describe('InventoryService – bảo trì & truy vấn', () => {
       expect(counts.reduce((a, b) => a + b, 0)).toBe(1);
       expect(await redisStock(skuId)).toBe(10);
     });
-
-    it('worker bỏ qua khi chưa bật WMS (chưa có kho mặc định)', async () => {
-      await prisma.warehouse.updateMany({ data: { isDefault: false } });
-      const fresh = new InventoryService(prisma);
-      const worker = new StockMaintenanceWorker(fresh);
-
-      expect(await worker.releaseExpiredHolds()).toBe(0);
-      fresh.onModuleDestroy();
-    });
   });
 
   // ---------- reconcileStock ----------
@@ -175,16 +165,19 @@ describe('InventoryService – bảo trì & truy vấn', () => {
 
       const map = await service.getAvailableStocks([a.id]);
 
-      expect(map?.get(a.id)).toBe(6);
+      expect(map.get(a.id)).toBe(6);
       expect(await redisStock(a.id)).toBe(6);
     });
 
-    it('trả null khi chưa bật WMS', async () => {
-      await prisma.warehouse.updateMany({ data: { isDefault: false } });
+    it('Redis lỗi: tính số còn bán được trực tiếp từ database', async () => {
+      const a = await sku(10, { reserved: 3 });
       const fresh = new InventoryService(prisma);
+      fresh.onModuleDestroy(); // đóng kết nối Redis → mọi lệnh Redis bị từ chối
 
-      expect(await fresh.getAvailableStocks([randomUUID()])).toBeNull();
-      fresh.onModuleDestroy();
+      const map = await fresh.getAvailableStocks([a.id, randomUUID()]);
+
+      expect(map.get(a.id)).toBe(7);
+      expect([...map.values()]).toEqual([7, 0]);
     });
   });
 
@@ -293,9 +286,9 @@ describe('InventoryService – bảo trì & truy vấn', () => {
 
   // ---------- Catalog đọc tồn ----------
 
-  it('Catalog khi đã bật WMS: hiển thị số còn bán được từ inventory_stocks, không dùng cột cũ', async () => {
+  it('Catalog hiển thị số còn bán được từ inventory_stocks', async () => {
     const category = await createCategory(prisma);
-    const product = await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 50 }] }); // cột cũ = 50
+    const product = await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 0 }] });
     const skuId = product.skus[0]!.id;
     await prisma.inventoryStock.create({ data: { skuId, warehouseId, onHand: 10, reserved: 3 } });
     const catalog = new CatalogService(prisma, service);
@@ -303,6 +296,5 @@ describe('InventoryService – bảo trì & truy vấn', () => {
     const res = await catalog.getAdminProducts({});
 
     expect(res.products[0]!.variants[0]!.stock_quantity).toBe(7);
-    catalog.onModuleDestroy();
   });
 });

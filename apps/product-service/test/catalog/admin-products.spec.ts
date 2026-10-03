@@ -6,6 +6,7 @@ import {
   createBrand,
   createCategory,
   createProduct,
+  createWarehouse,
   createTestRedis,
   flushTestRedis,
   resetProductDb,
@@ -16,6 +17,7 @@ describe('CatalogService – quản trị sản phẩm', () => {
   let redis: Redis;
   let service: CatalogService;
   let inventory: InventoryService;
+  let warehouseId: string;
 
   beforeAll(async () => {
     prisma = new PrismaProductService();
@@ -28,10 +30,10 @@ describe('CatalogService – quản trị sản phẩm', () => {
   beforeEach(async () => {
     await resetProductDb(prisma);
     await flushTestRedis(redis);
+    warehouseId = (await createWarehouse(prisma)).id;
   });
 
   afterAll(async () => {
-    service.onModuleDestroy();
     inventory.onModuleDestroy();
     redis.disconnect();
     await prisma.$disconnect();
@@ -102,14 +104,14 @@ describe('CatalogService – quản trị sản phẩm', () => {
       expect(stats).toMatchObject({ total: 4, published: 2, draft: 1, archived: 1 });
     });
 
-    it('tồn thấp (≤ 5) tính tổng mọi biến thể và ưu tiên tồn trên Redis', async () => {
+    it('tồn thấp (≤ 5) tính tổng số còn bán của mọi biến thể và ưu tiên tồn trên Redis', async () => {
       const category = await createCategory(prisma);
       // Tổng 3 → tồn thấp
-      await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 1 }, { stock: 2 }] });
+      await createProduct(prisma, { categoryId: category.id, warehouseId, skus: [{ stock: 1 }, { stock: 2 }] });
       // Tổng 20 → không thấp
-      await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 10 }, { stock: 10 }] });
-      // DB còn 50 nhưng Redis chỉ còn 4 bán được → tồn thấp
-      const hot = await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 50 }] });
+      await createProduct(prisma, { categoryId: category.id, warehouseId, skus: [{ stock: 10 }, { stock: 10 }] });
+      // Kho còn 50 nhưng Redis chỉ còn 4 bán được → tồn thấp
+      const hot = await createProduct(prisma, { categoryId: category.id, warehouseId, skus: [{ stock: 50 }] });
       await redis.set(`stock:${hot.skus[0]!.id}`, 4);
 
       const stats = await service.getAdminProductStats();
@@ -118,21 +120,4 @@ describe('CatalogService – quản trị sản phẩm', () => {
     });
   });
 
-  describe('updateSkuStock khi chưa bật WMS (luồng cũ – bỏ sau khi chuyển đổi)', () => {
-    // Lỗi #1 trong docs/06-wms-implementation-plan.md: ghi đè Redis bằng tồn DB, cộng nhầm phần đang giữ hàng.
-    // Dùng test.failing để ghi nhận lỗi; khi lỗi được sửa, test này sẽ báo để chuyển thành test thường.
-    test.failing('không làm mất phần tồn đang giữ chờ thanh toán khi admin sửa tồn', async () => {
-      const category = await createCategory(prisma);
-      const product = await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 10 }] });
-      const skuId = product.skus[0]!.id;
-      // Khách giữ 2 sản phẩm chờ thanh toán → Redis còn 8 bán được
-      await redis.set(`stock:${skuId}`, 8);
-
-      // Admin nhập thêm hàng: tồn thực tế mới là 15
-      await service.updateSkuStock({ sku_id: skuId, stock_quantity: 15 });
-
-      // Đúng ra còn bán được 15 − 2 = 13
-      expect(Number(await redis.get(`stock:${skuId}`))).toBe(13);
-    });
-  });
 });

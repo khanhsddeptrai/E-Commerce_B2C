@@ -3,8 +3,7 @@ import * as path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
-// Database riêng của order-service: product-service dùng order_db_test cho test backfill,
-// tách tên để hai bộ test chạy song song không xóa database của nhau
+// Database test riêng của order-service (tên khác order_db_test) để không đụng database của bộ test khác
 const TEST_ORDER_DB_NAME = 'order_db_ordersvc_test';
 
 const DEFAULT_ORDER_DATABASE_URL = 'postgresql://postgres:postgrespassword@localhost:5432/order_db?schema=public';

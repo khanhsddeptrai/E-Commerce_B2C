@@ -2,8 +2,8 @@
 
 # Ghi chú làm việc cho Claude Code
 
-## Công việc đang làm dở
-- **WMS (quản lý kho):** Bước 0–3 đã xong và đã chuyển đổi dữ liệu dev. Việc tiếp theo, trạng thái hiện tại và các lưu ý kỹ thuật nằm ở **`docs/06-wms-implementation-plan.md` mục 8** — đọc mục đó trước khi làm tiếp.
+## Trạng thái dự án
+- **WMS (quản lý kho):** đã hoàn thành (Bước 0–5, dev đã migrate). Thiết kế, quyết định và lưu ý kỹ thuật ở **`docs/06-wms-implementation-plan.md`** (mục 8 là tổng kết + việc còn mở). Sửa bất kỳ logic tồn kho nào phải đọc file đó trước.
 
 ## Ngôn ngữ
 - **Luôn trả lời người dùng bằng tiếng Việt** (giải thích, báo cáo, câu hỏi, gợi ý commit). Thuật ngữ kỹ thuật, tên file, lệnh và code giữ nguyên tiếng Anh.
@@ -13,7 +13,7 @@
 - Package manager: `pnpm` (workspace) + Turborepo.
 - **Kiểm tra sau khi sửa code:** `pnpm turbo run typecheck` (toàn repo) hoặc `pnpm --filter <app> typecheck`.
 - **Test (Jest):** `pnpm turbo run test` hoặc `pnpm --filter <product-service|order-service> test`. Cần Docker đang chạy (Postgres + Redis).
-  - Test đặt ở `apps/<service>/test/**/*.spec.ts`; dùng database test tạo mới mỗi lần chạy + `prisma migrate deploy` (product-service: `product_db_test` + `order_db_test` cho test backfill, Redis DB 15; order-service: `order_db_ordersvc_test`, dùng `FakeInventoryClient` thay cho gRPC thật). Helper có guard từ chối chạy trên DB không có hậu tố `_test`.
+  - Test đặt ở `apps/<service>/test/**/*.spec.ts`; dùng database test tạo mới mỗi lần chạy + `prisma migrate deploy` (product-service: `product_db_test`, Redis DB 15; order-service: `order_db_ordersvc_test`, dùng `FakeInventoryClient` thay cho gRPC thật). Helper có guard từ chối chạy trên DB không có hậu tố `_test`.
   - Test có tranh chấp đồng thời: kiểm chứng bằng cách tạm bỏ điều kiện chống trùng và xác nhận test fail (backup file vào scratchpad, không dùng `rm` với đường dẫn tương đối).
   - Lỗi đã biết nhưng chưa sửa được ghi bằng `test.failing` — khi sửa xong, đổi thành `it` thường.
   - Bắt buộc chạy test khi sửa bất kỳ logic tồn kho / đơn hàng nào.

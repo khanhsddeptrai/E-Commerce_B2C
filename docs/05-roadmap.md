@@ -39,7 +39,7 @@
   - [x] Xây dựng **Giỏ hàng trên Redis**: Thêm/sửa/xóa sản phẩm bằng Redis Hash (`cart:{userId}` / `cart:{guestSessionId}`).
   - [x] Viết **Redis Lua Script**: Kiểm tra và giữ kho tức thì (`Hold stock`) nguyên tử với TTL 15 phút.
   - [x] Xây dựng **Order Service** (:50053):
-    - [x] Thiết lập `order_db` (Bảng `orders`, `order_items`, `inventory_reservations`, `order_status_history`).
+    - [x] Thiết lập `order_db` (Bảng `orders`, `order_items`, `inventory_reservations`, `order_status_history`). *(Giai đoạn 5: giữ hàng chuyển sang `product_db`, bảng `inventory_reservations` của `order_db` đã xóa)*
     - [x] API tạo đơn hàng (Create Checkout) kèm định dạng mã chuẩn `ORD-YYMMDD-XXXX`.
     - [x] Worker định kỳ quét và giải phóng đơn hàng quá hạn 15 phút (`ExpiredOrderWorker`).
     - [x] Quản lý vòng đời trạng thái đơn hàng (Order State Machine: PENDING $\rightarrow$ CONFIRMED / CANCELLED).
@@ -83,21 +83,23 @@
 ## Giai Đoạn 5: Quản Trị Hệ Thống & Quản Lý Kho (Admin Dashboard & WMS)
 * **Mục tiêu**: Xây dựng trang quản trị toàn diện cho nhân viên/chủ shop và hệ thống quản lý xuất - nhập - tồn kho thực tế.
 * **Các công việc cụ thể**:
-  - [ ] Xây dựng **Hệ Thống Quản Lý Kho Thực Tế (WMS - Warehouse Management)**:
-    - **Cơ sở dữ liệu kho (`product_db`)**:
-      - Bổ sung bảng `inventory_receipts` (Phiếu nhập kho từ nhà cung cấp kèm mã phiếu `GRN-XXXX`, giá vốn `cost_price`).
-      - Bổ sung bảng `inventory_transactions` (Sổ nhật ký xuất - nhập - tồn: audit trail chi tiết từng SKU, số lượng thay đổi, số dư cuối, loại biến động `INBOUND`, `OUTBOUND`, `ADJUSTMENT`, `RETURN`).
-    - **Quy trình Nhập kho (Inbound)**: Tạo phiếu nhập hàng mới $\rightarrow$ cập nhật tồn kho vật lý `product_skus.stock_quantity` $\rightarrow$ tự động tăng tồn khả dụng trên Redis Cache (`INCRBY stock:{skuId}`).
-    - **Quy trình Xuất kho (Outbound & Order Fulfillment)**: Thủ kho bấm *"Xác nhận xuất kho đóng gói giao Shipper"* $\rightarrow$ trừ tồn kho vật lý thực tế trong CSDL và ghi nhận giao dịch theo mã đơn hàng.
-    - **Quy trình Kiểm kê & Hàng hoàn (Stock Adjustment & Returns)**: Xử lý hàng hư hỏng, xuất hủy hoặc nhập lại kho khi shipper hoàn đơn giao không thành công.
+  - [x] Xây dựng **Hệ Thống Quản Lý Kho Thực Tế (WMS - Warehouse Management)** *(hoàn thành 2026-10-03 – chi tiết `docs/06-wms-implementation-plan.md`)*:
+    - [x] **Cơ sở dữ liệu kho (`product_db`)**: `warehouses` (kho mặc định `HCM-01`), `inventory_stocks` (tồn thực tế `on_hand` / đã chốt `reserved` theo SKU × kho), `inventory_reservations` (giữ hàng theo đơn, chuyển từ `order_db`), `inventory_transactions` (sổ xuất - nhập - tồn `INBOUND` / `OUTBOUND` / `RETURN` / `ADJUSTMENT`), `inventory_receipts` + `inventory_receipt_items` (phiếu nhập `GRN-YYMMDD-XXXX`, giá vốn). Đã xóa cột cũ `product_skus.stock_quantity`.
+    - [x] **Tồn kho chỉ do Product Service quản lý** (`InventoryService` gRPC): Order Service không còn ghi `product_db` / Redis; thao tác kho sau khi tạo đơn đi qua `stock_sync_tasks` + `StockSyncWorker` (thử lại đến khi thành công).
+    - [x] **Quy trình Nhập kho (Inbound)**: Tạo phiếu nhập $\rightarrow$ tăng `on_hand`, ghi sổ `INBOUND`, tăng số còn bán được trên Redis (`INCRBY stock:{skuId}`).
+    - [x] **Quy trình Xuất kho (Outbound & Order Fulfillment)**: Admin bấm *"Xác nhận xuất kho"* (đơn `CONFIRMED` $\rightarrow$ `SHIPPING`) $\rightarrow$ trừ `on_hand` và `reserved`, ghi sổ `OUTBOUND` theo mã đơn.
+    - [x] **Quy trình Kiểm kê & Hàng hoàn (Stock Adjustment & Returns)**: Phiếu điều chỉnh kiểm kê (chênh lệch + lý do); giao thất bại $\rightarrow$ *"Nhận hàng hoàn"* (`RETURNED`) nhập lại kho, ghi sổ `RETURN`.
   - [ ] Xây dựng **Admin Dashboard** *(đã làm một phần)*:
     - *Hiện trạng: Admin đang nằm trong `apps/storefront/src/app/admin` (Next.js + Tailwind, chưa dùng Shadcn UI / TanStack Table), chưa tách thành `apps/admin`.*
     - [x] Bảo vệ truy cập theo vai trò (RBAC): chặn người chưa đăng nhập và tài khoản không phải `ADMIN` ở `admin/layout.tsx` lẫn API Gateway.
     - [x] Phân hệ Quản lý Sản phẩm (`/admin/products`): danh sách có lọc/tìm kiếm/phân trang, tạo/sửa sản phẩm kèm biến thể SKU và thông số, đổi trạng thái `PUBLISHED`/`ARCHIVED`, cập nhật tồn kho SKU, tải ảnh sản phẩm.
     - [ ] Quản lý danh mục và thương hiệu (hiện mới có API đọc `GET /categories`, `GET /brands`).
-    - [ ] Phân hệ Quản lý Kho: Tra cứu tồn thực tế vs tồn bán được, tạo phiếu nhập kho, xuất báo cáo xuất-nhập-tồn.
+    - [x] Phân hệ Quản lý Kho (`/admin/inventory`): tồn thực tế / đã chốt / đang giữ / còn bán được, điều chỉnh kiểm kê, phiếu nhập kho, sổ xuất nhập tồn có bộ lọc, đối soát Redis.
+    - [ ] Xuất file báo cáo xuất - nhập - tồn (Excel / PDF).
     - [x] Phân hệ Quản lý Đơn hàng (`/admin/orders`): danh sách và chi tiết đơn hàng, cập nhật trạng thái vận chuyển kèm hãng và mã vận đơn, trục thời gian lịch sử trạng thái.
-    - [ ] Duyệt đơn, xác nhận xuất kho và công cụ kích hoạt giả lập Webhook vận chuyển (Mock Carrier Trigger) trên giao diện.
+    - [x] Duyệt đơn, xác nhận xuất kho, giao thất bại, nhận hàng hoàn, cảnh báo và thử lại đồng bộ kho trên `/admin/orders`.
+    - [ ] Công cụ kích hoạt giả lập Webhook vận chuyển (Mock Carrier Trigger) trên giao diện.
+    - [ ] Phân trang server cho `/admin/orders` (hiện tải tối đa 50 đơn và lọc phía client).
 
 ---
 

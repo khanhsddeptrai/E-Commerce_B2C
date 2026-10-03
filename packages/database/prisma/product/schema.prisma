@@ -118,8 +118,6 @@ model ProductSku {
   colorHex      String   @map("color_hex") @db.VarChar(20)
   price         Decimal  @db.Decimal(15, 2)
   originalPrice Decimal? @map("original_price") @db.Decimal(15, 2)
-  // Ngừng dùng sau khi chuyển sang inventory_stocks (WMS); sẽ xóa ở migration dọn dẹp
-  stockQuantity Int      @default(0) @map("stock_quantity")
   imageUrl      String?  @map("image_url") @db.Text
   specs         Json?    @db.JsonB
   isActive      Boolean  @default(true) @map("is_active")

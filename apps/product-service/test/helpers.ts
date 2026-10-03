@@ -1,8 +1,8 @@
 import Redis from 'ioredis';
 import { RpcException } from '@nestjs/microservices';
-import { OrderPrisma, OrderPrismaClient, ProductPrisma, ProductPrismaClient } from '@repo/database';
+import { ProductPrisma, ProductPrismaClient } from '@repo/database';
 import { PrismaProductService } from '../src/prisma/prisma-product.service';
-import { assertTestDatabaseName, getTestOrderDatabaseUrl, TEST_REDIS_DB } from './test-env';
+import { assertTestDatabaseName, TEST_REDIS_DB } from './test-env';
 
 type RawSqlClient = Pick<ProductPrismaClient, '$queryRawUnsafe' | '$executeRawUnsafe'>;
 
@@ -20,10 +20,6 @@ export async function resetTestDb(prisma: RawSqlClient): Promise<void> {
 }
 
 export const resetProductDb = (prisma: PrismaProductService): Promise<void> => resetTestDb(prisma);
-
-export function createTestOrderPrisma(): OrderPrismaClient {
-  return new OrderPrismaClient({ datasources: { db: { url: getTestOrderDatabaseUrl() } } });
-}
 
 export function createTestRedis(): Redis {
   return new Redis(process.env.REDIS_URL as string);
@@ -69,66 +65,20 @@ export async function createBrand(prisma: PrismaProductService, name = `Brand ${
   return prisma.brand.create({ data: { name, slug: `brand-${n}` } });
 }
 
-interface OrderFixtureInput {
-  status: OrderPrisma.OrderStatus;
-  paymentMethod: OrderPrisma.PaymentMethod;
-  paymentStatus?: OrderPrisma.PaymentStatus;
-  items: { skuId: string; quantity: number }[];
-  /** Tạo kèm giữ hàng trong order_db (mô hình cũ) với trạng thái và hạn tương ứng */
-  reservation?: { status: OrderPrisma.ReservationStatus; expiresAt: Date | null };
-}
-
-export async function createLegacyOrder(orderPrisma: OrderPrismaClient, input: OrderFixtureInput) {
-  const n = nextId();
-  return orderPrisma.order.create({
-    data: {
-      orderCode: `ORD-TEST-${n}`,
-      customerId: '00000000-0000-4000-8000-000000000001',
-      customerName: 'Khách Test',
-      customerPhone: '0900000000',
-      customerEmail: 'test@example.test',
-      shippingAddress: {},
-      subtotalAmount: 100000,
-      totalAmount: 100000,
-      paymentMethod: input.paymentMethod,
-      paymentStatus: input.paymentStatus ?? 'PENDING',
-      orderStatus: input.status,
-      items: {
-        create: input.items.map((i) => ({
-          skuId: i.skuId,
-          productId: '00000000-0000-4000-8000-000000000002',
-          productName: 'Sản phẩm test',
-          skuName: 'Biến thể test',
-          unitPrice: 100000,
-          quantity: i.quantity,
-          totalPrice: 100000 * i.quantity,
-        })),
-      },
-      reservations: input.reservation
-        ? {
-            create: input.items.map((i) => ({
-              skuId: i.skuId,
-              quantity: i.quantity,
-              status: input.reservation!.status,
-              expiresAt: input.reservation!.expiresAt,
-            })),
-          }
-        : undefined,
-    },
-  });
-}
-
 interface ProductFixtureInput {
   categoryId: string;
   brandId?: string;
   name?: string;
   status?: ProductPrisma.ProductStatus;
+  /** stock = tồn thực tế tại warehouseId (chỉ tạo dòng tồn khi truyền warehouseId) */
   skus?: { stock: number; skuCode?: string }[];
+  warehouseId?: string;
 }
 
 export async function createProduct(prisma: PrismaProductService, input: ProductFixtureInput) {
   const n = nextId();
-  return prisma.product.create({
+  const skus = input.skus ?? [{ stock: 10 }];
+  const product = await prisma.product.create({
     data: {
       name: input.name ?? `Sản phẩm ${n}`,
       slug: `product-${n}`,
@@ -139,18 +89,28 @@ export async function createProduct(prisma: PrismaProductService, input: Product
       basePrice: 100000,
       status: input.status ?? 'PUBLISHED',
       skus: {
-        create: (input.skus ?? [{ stock: 10 }]).map((s, idx) => ({
+        create: skus.map((s, idx) => ({
           skuCode: s.skuCode ?? `SKU-${n}-${idx}`,
           name: `Biến thể ${idx + 1}`,
           colorName: 'Đen',
           colorHex: '#000000',
           price: 100000,
-          stockQuantity: s.stock,
         })),
       },
     },
     include: { skus: true },
   });
+  if (input.warehouseId) {
+    const warehouseId = input.warehouseId;
+    await prisma.inventoryStock.createMany({
+      data: product.skus.map((sku) => ({
+        skuId: sku.id,
+        warehouseId,
+        onHand: skus[product.skus.findIndex((x) => x.skuCode === sku.skuCode)]?.stock ?? 0,
+      })),
+    });
+  }
+  return product;
 }
 
 export async function createWarehouse(prisma: PrismaProductService, isDefault = true) {
@@ -166,7 +126,7 @@ export async function createStockedSku(
 ) {
   const category = await createCategory(prisma);
   const product = await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 0 }] });
-  const sku = product.skus[0]!;
+  const sku = product.skus[0]!; // createProduct không truyền warehouseId → chưa có dòng tồn
   await prisma.inventoryStock.create({
     data: { skuId: sku.id, warehouseId, onHand: stock.onHand, reserved: stock.reserved ?? 0 },
   });

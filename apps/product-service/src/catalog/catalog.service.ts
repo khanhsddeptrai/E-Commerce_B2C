@@ -1,7 +1,6 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
-import Redis from 'ioredis';
 import { PrismaProductService } from '../prisma/prisma-product.service';
 import { InventoryService } from '../inventory/inventory.service';
 import { ProductPrisma } from '@repo/database';
@@ -46,22 +45,11 @@ type ProductWithRelations = ProductPrisma.Prisma.ProductGetPayload<{
 }>;
 
 @Injectable()
-export class CatalogService implements OnModuleDestroy {
-  private readonly redis: Redis;
-
+export class CatalogService {
   constructor(
     private readonly prisma: PrismaProductService,
     private readonly inventory: InventoryService,
-  ) {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl, {
-      maxRetriesPerRequest: 3,
-    });
-  }
-
-  onModuleDestroy(): void {
-    this.redis.disconnect();
-  }
+  ) {}
 
   async getProducts(data: GetProductsRequest): Promise<GetProductsResponse> {
     const page = Math.max(1, Number(data.page) || 1);
@@ -320,11 +308,11 @@ export class CatalogService implements OnModuleDestroy {
       this.prisma.product.findMany({ select: { id: true } }),
     ]);
 
-    // Tính tồn theo cùng nguồn với bảng danh sách (Redis, fallback PostgreSQL)
+    // Tính tồn theo cùng nguồn với bảng danh sách (số còn bán được từ InventoryService)
     const liveStockMap = await this.resolveSkuStocks(skus);
     const stockByProduct = new Map<string, number>();
     for (const sku of skus) {
-      const stock = liveStockMap.get(sku.id) ?? sku.stockQuantity;
+      const stock = liveStockMap.get(sku.id) ?? 0;
       stockByProduct.set(sku.productId, (stockByProduct.get(sku.productId) ?? 0) + stock);
     }
 
@@ -374,8 +362,9 @@ export class CatalogService implements OnModuleDestroy {
   async createProduct(data: CreateProductRequest): Promise<ProductDto> {
     const rawSlug = data.slug || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
     const slug = `${rawSlug}-${Math.random().toString(36).substring(2, 6)}`;
-    // Đã bật WMS: khởi tạo tồn ban đầu qua inventory_stocks + sổ kho; chưa bật: chỉ ghi stock_quantity (luồng cũ)
-    const warehouseId = await this.inventory.findDefaultWarehouseId();
+    // Tồn ban đầu của biến thể được nhập vào kho mặc định (inventory_stocks + sổ kho INBOUND tồn đầu kỳ)
+    const warehouseId = await this.inventory.getDefaultWarehouseId();
+    const initialStockByCode = new Map((data.variants || []).map((v) => [v.sku_code, v.stock_quantity || 0]));
 
     const created = await this.prisma.$transaction(async (tx) => {
       const product = await tx.product.create({
@@ -415,7 +404,6 @@ export class CatalogService implements OnModuleDestroy {
               colorHex: v.color_hex,
               price: v.price,
               originalPrice: v.original_price ?? null,
-              stockQuantity: v.stock_quantity,
               imageUrl: v.image_url || null,
               specs: v.specs_json ? JSON.parse(v.specs_json) : {},
               isActive: true,
@@ -431,28 +419,20 @@ export class CatalogService implements OnModuleDestroy {
         },
       });
 
-      if (warehouseId) {
-        await this.inventory.initializeSkuStocks(
-          tx,
-          warehouseId,
-          product.skus.map((s) => ({ id: s.id, quantity: s.stockQuantity })),
-          `PRODUCT:${product.id}`,
-          'ADMIN',
-        );
-      }
+      await this.inventory.initializeSkuStocks(
+        tx,
+        warehouseId,
+        product.skus.map((s) => ({ id: s.id, quantity: initialStockByCode.get(s.skuCode) ?? 0 })),
+        `PRODUCT:${product.id}`,
+        'ADMIN',
+      );
 
       return product;
     });
 
-    if (created.skus && created.skus.length > 0) {
-      const pipeline = this.redis.pipeline();
-      for (const sku of created.skus) {
-        pipeline.set(`stock:${sku.id}`, sku.stockQuantity);
-      }
-      await pipeline.exec().catch(() => {});
-    }
-
-    return this.mapProductToDto(created);
+    // Key Redis stock:{skuId} được khởi tạo từ database ở lần đọc đầu tiên
+    const liveStockMap = await this.resolveSkuStocks(created.skus || []);
+    return this.mapProductToDto(created, liveStockMap);
   }
 
   async updateProduct(data: UpdateProductRequest): Promise<ProductDto> {
@@ -542,32 +522,23 @@ export class CatalogService implements OnModuleDestroy {
     return this.mapProductToDto(updated, liveStockMap);
   }
 
+  /**
+   * Admin sửa nhanh: stock_quantity là tồn thực tế mới tại kho mặc định — ghi phiếu điều chỉnh phần chênh lệch
+   * (không ghi đè Redis nên không mất phần đang giữ / đã chốt). Trả về stock_quantity = số còn bán được.
+   */
   async updateSkuStock(data: UpdateSkuStockRequest): Promise<ProductSkuDto> {
-    // Đã bật WMS: đặt tồn thực tế mới bằng phiếu điều chỉnh phần chênh lệch (không ghi đè Redis → không mất phần đang giữ)
-    const wmsStock = await this.inventory.setOnHand(
+    await this.inventory.setOnHand(
       data.sku_id,
       data.stock_quantity,
       data.updated_by || 'ADMIN',
       'Admin cập nhật nhanh tồn kho',
     );
 
-    const updateData: ProductPrisma.Prisma.ProductSkuUpdateInput = {
-      // Giữ cột cũ đồng bộ với tồn thực tế cho tới khi catalog chuyển hẳn sang đọc inventory_stocks
-      stockQuantity: wmsStock ? wmsStock.on_hand : data.stock_quantity,
-    };
-    if (data.price !== undefined && data.price !== null) {
-      updateData.price = data.price;
-    }
-
-    const sku = await this.prisma.productSku.update({
-      where: { id: data.sku_id },
-      data: updateData,
-    });
-
-    if (!wmsStock) {
-      // Luồng cũ (chưa bật WMS) – lỗi #1: ghi đè Redis, sẽ bỏ khi chuyển đổi xong
-      await this.redis.set(`stock:${sku.id}`, sku.stockQuantity);
-    }
+    const sku =
+      data.price !== undefined && data.price !== null
+        ? await this.prisma.productSku.update({ where: { id: data.sku_id }, data: { price: data.price } })
+        : await this.prisma.productSku.findUniqueOrThrow({ where: { id: data.sku_id } });
+    const available = (await this.inventory.getAvailableStocks([sku.id])).get(sku.id) ?? 0;
 
     return {
       id: sku.id,
@@ -577,55 +548,15 @@ export class CatalogService implements OnModuleDestroy {
       color_hex: sku.colorHex,
       price: Number(sku.price),
       original_price: sku.originalPrice ? Number(sku.originalPrice) : undefined,
-      stock_quantity: sku.stockQuantity,
+      stock_quantity: available,
       image_url: sku.imageUrl || undefined,
       specs_json: sku.specs ? JSON.stringify(sku.specs) : '{}',
     };
   }
 
-  private async resolveSkuStocks(
-    skus: ProductPrisma.ProductSku[],
-  ): Promise<Map<string, number>> {
-    const stockMap = new Map<string, number>();
-    if (!skus || skus.length === 0) return stockMap;
-
-    try {
-      // Đã bật WMS: số còn bán được lấy từ InventoryService (key thiếu được khởi tạo từ inventory_stocks)
-      const wmsStocks = await this.inventory.getAvailableStocks(skus.map((s) => s.id));
-      if (wmsStocks) return wmsStocks;
-
-      // Chưa bật WMS (luồng cũ): key thiếu được khởi tạo từ product_skus.stock_quantity
-      const keys = skus.map((s) => `stock:${s.id}`);
-      const results = await this.redis.mget(...keys);
-
-      const missingSkus: ProductPrisma.ProductSku[] = [];
-
-      for (let i = 0; i < skus.length; i++) {
-        const sku = skus[i];
-        if (!sku) continue;
-        const val = results[i];
-        if (val !== null && val !== undefined) {
-          stockMap.set(sku.id, Math.max(0, Number(val)));
-        } else {
-          stockMap.set(sku.id, sku.stockQuantity);
-          missingSkus.push(sku);
-        }
-      }
-
-      if (missingSkus.length > 0) {
-        const pipeline = this.redis.pipeline();
-        for (const sku of missingSkus) {
-          pipeline.set(`stock:${sku.id}`, sku.stockQuantity);
-        }
-        await pipeline.exec().catch(() => {});
-      }
-    } catch {
-      for (const sku of skus) {
-        stockMap.set(sku.id, sku.stockQuantity);
-      }
-    }
-
-    return stockMap;
+  /** Số còn bán được của các SKU (Redis, khởi tạo / dự phòng từ inventory_stocks) */
+  private resolveSkuStocks(skus: ProductPrisma.ProductSku[]): Promise<Map<string, number>> {
+    return this.inventory.getAvailableStocks(skus.map((s) => s.id));
   }
 
   private mapProductToDto(
@@ -668,7 +599,7 @@ export class CatalogService implements OnModuleDestroy {
             color_hex: sku.colorHex,
             price: Number(sku.price),
             original_price: sku.originalPrice ? Number(sku.originalPrice) : undefined,
-            stock_quantity: liveStockMap?.get(sku.id) ?? sku.stockQuantity,
+            stock_quantity: liveStockMap?.get(sku.id) ?? 0,
             image_url: sku.imageUrl || undefined,
             specs_json: sku.specs ? JSON.stringify(sku.specs) : '{}',
           }))

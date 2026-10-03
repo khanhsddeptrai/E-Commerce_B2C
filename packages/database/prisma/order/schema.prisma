@@ -32,12 +32,6 @@ enum OrderStatus {
   RETURNED
 }
 
-enum ReservationStatus {
-  HOLD
-  COMMITTED
-  RELEASED
-}
-
 model Order {
   id              String        @id @default(uuid()) @db.Uuid
   orderCode       String        @unique @map("order_code") @db.VarChar(50)
@@ -66,7 +60,6 @@ model Order {
 
   items          OrderItem[]
   statusHistory  OrderStatusHistory[]
-  reservations   InventoryReservation[] // Mô hình cũ – chỉ còn để backfill đọc, xóa ở Bước 5 (WMS)
   stockSyncTasks StockSyncTask[]
 
   @@index([customerId])
@@ -108,23 +101,6 @@ model OrderStatusHistory {
 
   @@index([orderId])
   @@map("order_status_history")
-}
-
-model InventoryReservation {
-  id        String            @id @default(uuid()) @db.Uuid
-  orderId   String?           @map("order_id") @db.Uuid
-  skuId     String            @map("sku_id") @db.Uuid
-  quantity  Int               @map("quantity")
-  status    ReservationStatus @default(HOLD) @map("status")
-  expiresAt DateTime?         @map("expires_at")
-  createdAt DateTime          @default(now()) @map("created_at")
-
-  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
-
-  @@index([orderId])
-  @@index([skuId])
-  @@index([status, expiresAt])
-  @@map("inventory_reservations")
 }
 
 // ---------- Đồng bộ thao tác kho với Product Service (WMS – docs/06 mục 5.1) ----------

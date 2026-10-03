@@ -16,6 +16,7 @@ for (const p of envPaths) {
 }
 
 const { PrismaClient } = require('../src/generated/product-client');
+const { ensureOpeningStock } = require('./seed-inventory');
 
 const prisma = new PrismaClient({
   datasources: {
@@ -782,7 +783,7 @@ async function main() {
 
     // Cập nhật SKUs
     for (const s of skus) {
-      await prisma.productSku.upsert({
+      const savedSku = await prisma.productSku.upsert({
         where: { skuCode: s.skuCode },
         update: {
           productId: product.id,
@@ -791,7 +792,6 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
         },
         create: {
@@ -802,10 +802,10 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
         },
       });
+      await ensureOpeningStock(prisma, savedSku.id, s.stockQuantity);
     }
 
     // Cập nhật Specs

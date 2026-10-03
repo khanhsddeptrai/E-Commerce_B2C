@@ -581,15 +581,17 @@ export class InventoryService implements OnModuleDestroy {
     }
   }
 
-  // ---------- Dùng cho Catalog (giai đoạn chuyển đổi sang WMS) ----------
+  // ---------- Dùng cho Catalog ----------
 
-  /** id kho mặc định, hoặc null nếu WMS chưa được bật (chưa chạy backfill) */
-  async findDefaultWarehouseId(): Promise<string | null> {
+  /** id kho mặc định (migration luôn tạo sẵn kho HCM-01); lỗi FAILED_PRECONDITION nếu không có kho mặc định đang hoạt động */
+  async getDefaultWarehouseId(): Promise<string> {
     if (this.defaultWarehouseId) return this.defaultWarehouseId;
     const warehouse = await this.prisma.warehouse.findFirst({ where: { isDefault: true, isActive: true } });
-    // Chỉ cache khi đã có kho: backfill có thể chạy trong lúc service đang hoạt động
-    if (warehouse) this.defaultWarehouseId = warehouse.id;
-    return warehouse?.id ?? null;
+    if (!warehouse) {
+      throw rpcError(status.FAILED_PRECONDITION, 'Chưa cấu hình kho mặc định đang hoạt động');
+    }
+    this.defaultWarehouseId = warehouse.id;
+    return warehouse.id;
   }
 
   /** Khởi tạo tồn cho SKU mới tạo (trong transaction tạo sản phẩm): ghi sổ INBOUND tồn đầu kỳ */
@@ -614,20 +616,18 @@ export class InventoryService implements OnModuleDestroy {
     }
   }
 
-  /**
-   * Đặt tồn thực tế của SKU tại kho mặc định về giá trị mới bằng phiếu điều chỉnh phần chênh lệch.
-   * Trả null nếu WMS chưa được bật hoặc SKU chưa có dòng tồn (dùng hành vi cũ).
-   */
-  async setOnHand(skuId: string, target: number, createdBy: string, reason: string): Promise<InventoryStockDto | null> {
-    const warehouseId = await this.findDefaultWarehouseId();
-    if (!warehouseId) return null;
+  /** Đặt tồn thực tế của SKU tại kho mặc định về giá trị mới bằng phiếu điều chỉnh phần chênh lệch */
+  async setOnHand(skuId: string, target: number, createdBy: string, reason: string): Promise<InventoryStockDto> {
     if (!Number.isInteger(target) || target < 0) {
       throw rpcError(status.INVALID_ARGUMENT, 'Tồn kho phải là số nguyên không âm');
     }
+    const warehouseId = await this.getDefaultWarehouseId();
     const current = await this.prisma.inventoryStock.findUnique({
       where: { skuId_warehouseId: { skuId, warehouseId } },
     });
-    if (!current) return null;
+    if (!current) {
+      throw rpcError(status.NOT_FOUND, 'Sản phẩm chưa có tồn tại kho mặc định – hãy tạo phiếu nhập kho');
+    }
 
     const delta = target - current.onHand;
     if (delta === 0) return mapStock(current);
@@ -637,17 +637,21 @@ export class InventoryService implements OnModuleDestroy {
 
   /**
    * Số lượng còn bán được của các SKU (đọc Redis, khởi tạo key thiếu từ database).
-   * Trả null nếu WMS chưa được bật — Catalog dùng cách đọc cũ.
+   * Redis lỗi → tính trực tiếp từ database để trang sản phẩm vẫn hiển thị được.
    */
-  async getAvailableStocks(skuIds: string[]): Promise<Map<string, number> | null> {
-    if (!(await this.findDefaultWarehouseId())) return null;
+  async getAvailableStocks(skuIds: string[]): Promise<Map<string, number>> {
     const ids = [...new Set(skuIds)];
     const result = new Map<string, number>();
     if (ids.length === 0) return result;
 
-    await this.ensureStockKeys(ids);
-    const values = await this.redis.mget(...ids.map(stockKey));
-    ids.forEach((id, idx) => result.set(id, Math.max(0, Number(values[idx] ?? 0))));
+    try {
+      await this.ensureStockKeys(ids);
+      const values = await this.redis.mget(...ids.map(stockKey));
+      ids.forEach((id, idx) => result.set(id, Math.max(0, Number(values[idx] ?? 0))));
+    } catch {
+      const available = await this.computeAvailableFromDb(ids);
+      ids.forEach((id) => result.set(id, Math.max(0, available.get(id) ?? 0)));
+    }
     return result;
   }
 
@@ -794,17 +798,6 @@ export class InventoryService implements OnModuleDestroy {
   }
 
   // ---------- Tiện ích ----------
-
-  private async getDefaultWarehouseId(): Promise<string> {
-    const warehouseId = await this.findDefaultWarehouseId();
-    if (!warehouseId) {
-      throw rpcError(
-        status.FAILED_PRECONDITION,
-        'Chưa khởi tạo kho mặc định – chạy pnpm --filter @repo/database db:inventory:backfill',
-      );
-    }
-    return warehouseId;
-  }
 
   private async resolveWarehouseId(warehouseId: string | undefined): Promise<string> {
     if (!warehouseId) return this.getDefaultWarehouseId();

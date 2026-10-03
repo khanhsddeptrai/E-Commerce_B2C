@@ -6,6 +6,7 @@ import { InventoryService } from '../../src/inventory/inventory.service';
 import { PrismaProductService } from '../../src/prisma/prisma-product.service';
 import {
   createCategory,
+  createProduct,
   createStockedSku,
   createTestRedis,
   createWarehouse,
@@ -318,7 +319,7 @@ describe('InventoryService – nhập kho, điều chỉnh, hàng hoàn', () => 
   });
 });
 
-describe('CatalogService khi đã bật WMS (có kho mặc định)', () => {
+describe('CatalogService – tồn kho qua InventoryService', () => {
   let prisma: PrismaProductService;
   let redis: Redis;
   let inventory: InventoryService;
@@ -340,7 +341,6 @@ describe('CatalogService khi đã bật WMS (có kho mặc định)', () => {
   });
 
   afterEach(() => {
-    catalog.onModuleDestroy();
     inventory.onModuleDestroy();
   });
 
@@ -385,7 +385,7 @@ describe('CatalogService khi đã bật WMS (có kho mặc định)', () => {
 
     const res = await catalog.updateSkuStock({ sku_id: sku.id, stock_quantity: 15, updated_by: 'ADMIN_a@test' });
 
-    expect(res.stock_quantity).toBe(15);
+    expect(res.stock_quantity).toBe(13); // trả về số còn bán được
     expect(await prisma.inventoryStock.findFirstOrThrow({ where: { skuId: sku.id } })).toMatchObject({ onHand: 15 });
     expect(Number(await redis.get(`stock:${sku.id}`))).toBe(13);
     const tx = await prisma.inventoryTransaction.findFirstOrThrow({ where: { skuId: sku.id } });
@@ -399,6 +399,44 @@ describe('CatalogService khi đã bật WMS (có kho mặc định)', () => {
     await expectRpcError(catalog.updateSkuStock({ sku_id: sku.id, stock_quantity: 5 }), status.FAILED_PRECONDITION);
 
     expect(await prisma.inventoryStock.findFirstOrThrow({ where: { skuId: sku.id } })).toMatchObject({ onHand: 10 });
+  });
+
+  it('updateSkuStock: SKU chưa có dòng tồn tại kho mặc định → NOT_FOUND, không đổi giá', async () => {
+    const category = await createCategory(prisma);
+    const product = await createProduct(prisma, { categoryId: category.id, skus: [{ stock: 0 }] });
+    const skuId = product.skus[0]!.id;
+
+    await expectRpcError(catalog.updateSkuStock({ sku_id: skuId, stock_quantity: 5, price: 1 }), status.NOT_FOUND);
+
+    expect(Number((await prisma.productSku.findUniqueOrThrow({ where: { id: skuId } })).price)).toBe(100000);
+  });
+
+  it('createProduct: không có kho mặc định → FAILED_PRECONDITION, không tạo sản phẩm', async () => {
+    await prisma.warehouse.updateMany({ data: { isDefault: false } });
+    const fresh = new InventoryService(prisma);
+    const freshCatalog = new CatalogService(prisma, fresh);
+    const category = await createCategory(prisma);
+
+    await expectRpcError(
+      freshCatalog.createProduct({
+        name: 'Không có kho',
+        slug: 'khong-co-kho',
+        category_id: category.id,
+        description: '',
+        thumbnail_url: '',
+        base_price: 1,
+        featured: false,
+        is_flash_sale: false,
+        status: 'PUBLISHED',
+        images: [],
+        specs: [],
+        variants: [{ sku_code: `NK-${randomUUID()}`, name: 'A', color_name: 'A', color_hex: '#000', price: 1, stock_quantity: 1 }],
+      }),
+      status.FAILED_PRECONDITION,
+    );
+
+    expect(await prisma.product.count()).toBe(0);
+    fresh.onModuleDestroy();
   });
 
   it('updateSkuStock: chỉ đổi giá, giữ nguyên tồn → không ghi sổ', async () => {

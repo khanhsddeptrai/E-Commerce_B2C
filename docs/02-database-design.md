@@ -118,11 +118,12 @@
 | `sku_code` | VARCHAR(100) | UNIQUE, NOT NULL | Mã SKU (ví dụ: `TSHIRT-RED-XL`) |
 | `price` | DECIMAL(15,2)| NOT NULL | Giá bán thực tế hiện tại |
 | `original_price`| DECIMAL(15,2)| NULLABLE | Giá niêm yết (dùng hiển thị gạch giá) |
-| `stock_quantity`| INT | NOT NULL, Default `0` | Số lượng tồn kho cơ sở tại DB |
 | `image_url` | TEXT | NULLABLE | Ảnh riêng của biến thể này |
 | `is_active` | BOOLEAN | Default `true` | Bật/tắt SKU |
 | `created_at` | TIMESTAMP | Default `NOW()` | Thời gian tạo |
 | `updated_at` | TIMESTAMP | Default `NOW()` | Thời gian cập nhật |
+
+> SKU không còn cột tồn kho: tồn kho nằm ở các bảng kho (mục 3.9). Cột `stock_quantity` cũ đã bị xóa ở migration `20261003150000_drop_legacy_stock_quantity`.
 
 ### 3.7. Bảng `product_sku_attribute_values` (Junction Table)
 | Cột | Kiểu Dữ Liệu | Ràng Buộc | Ý Nghĩa / Mô Tả |
@@ -133,9 +134,67 @@
 ### 3.8. Bảng `outbox_events` (Transactional Outbox)
 * `id` (UUID, PK), `aggregate_type` (`PRODUCT`), `aggregate_id` (ID), `event_type` (`PRODUCT_CREATED`, `PRODUCT_UPDATED`), `payload` (JSONB), `status` (`PENDING`, `PUBLISHED`, `FAILED`), `retry_count` (INT), `created_at`, `published_at`.
 
+### 3.9. Quản lý kho (WMS)
+Toàn bộ tồn kho do Product Service quản lý (`InventoryService`). Mô hình và luồng nghiệp vụ chi tiết: `docs/06-wms-implementation-plan.md`.
+
+```
+on_hand    tồn vật lý trong kho     — chỉ đổi khi: nhập kho, xuất kho, nhận hàng hoàn, kiểm kê
+reserved   đã chốt đơn, chưa xuất   — tăng khi chốt đơn, giảm khi xuất kho / hủy trước khi xuất
+held       đang giữ chờ thanh toán  — tổng reservation HOLD chưa nhả
+available  = on_hand − reserved − held   → cache Redis stock:{sku_id} (tổng mọi kho)
+```
+
+**`warehouses`** — danh sách kho. Migration luôn tạo sẵn kho mặc định `HCM-01`.
+| Cột | Kiểu Dữ Liệu | Ràng Buộc | Ý Nghĩa / Mô Tả |
+| :--- | :--- | :--- | :--- |
+| `id` | UUID | PK | Định danh kho |
+| `code` | VARCHAR(20) | UNIQUE, NOT NULL | Mã kho (ví dụ: `HCM-01`) |
+| `name` | VARCHAR(200) | NOT NULL | Tên kho |
+| `address` | TEXT | NULLABLE | Địa chỉ kho |
+| `is_default` | BOOLEAN | Default `false` | Kho mặc định (nhập / xuất cho đơn hàng) |
+| `is_active` | BOOLEAN | Default `true` | Kho đang hoạt động |
+
+**`inventory_stocks`** — tồn theo SKU × kho.
+| Cột | Kiểu Dữ Liệu | Ràng Buộc | Ý Nghĩa / Mô Tả |
+| :--- | :--- | :--- | :--- |
+| `id` | UUID | PK | Định danh |
+| `sku_id` | UUID | FK -> `product_skus.id` (RESTRICT) | SKU |
+| `warehouse_id` | UUID | FK -> `warehouses.id` (INDEX) | Kho |
+| `on_hand` | INT | Default `0` | Tồn vật lý |
+| `reserved` | INT | Default `0` | Đã chốt đơn, chưa xuất kho |
+| `version` | INT | Default `0` | Optimistic locking |
+| | | UNIQUE (`sku_id`, `warehouse_id`) | |
+
+**`inventory_reservations`** — giữ hàng theo đơn (chuyển từ `order_db` sang).
+| Cột | Kiểu Dữ Liệu | Ràng Buộc | Ý Nghĩa / Mô Tả |
+| :--- | :--- | :--- | :--- |
+| `id` | UUID | PK | Định danh |
+| `order_id` / `order_code` | UUID / VARCHAR(50) | NOT NULL (INDEX `order_code`) | Đơn hàng giữ hàng (không có khóa ngoại chéo database) |
+| `sku_id`, `warehouse_id` | UUID | FK | SKU và kho giữ hàng |
+| `quantity` | INT | NOT NULL | Số lượng |
+| `status` | ENUM | Default `HOLD` | `HOLD` (chờ thanh toán) → `COMMITTED` (đã chốt) → `SHIPPED` (đã xuất) / `RELEASED` (đã nhả) |
+| `expires_at` | TIMESTAMP | NULLABLE (INDEX cùng `status`) | Hạn giữ của `HOLD` (15 phút) |
+| | | UNIQUE (`order_id`, `sku_id`, `warehouse_id`) | Idempotent theo đơn |
+
+**`inventory_transactions`** — sổ xuất nhập tồn, chỉ thêm, không sửa.
+| Cột | Kiểu Dữ Liệu | Ràng Buộc | Ý Nghĩa / Mô Tả |
+| :--- | :--- | :--- | :--- |
+| `id` | UUID | PK | Định danh |
+| `sku_id`, `warehouse_id` | UUID | FK | SKU và kho |
+| `type` | ENUM | NOT NULL | `INBOUND`, `OUTBOUND`, `RETURN`, `ADJUSTMENT` |
+| `quantity` | INT | NOT NULL | Dương: tăng tồn, âm: giảm tồn |
+| `balance_after` | INT | NOT NULL | `on_hand` sau giao dịch |
+| `ref_type` / `ref_id` | VARCHAR | NOT NULL | Chứng từ: `OPENING` (tồn đầu kỳ), `RECEIPT` (GRN-…), `ORDER` (mã đơn), `ADJUSTMENT` (ADJ-…) |
+| `note`, `created_by`, `created_at` | | | Ghi chú, người thực hiện, thời điểm |
+| | | UNIQUE (`ref_type`, `ref_id`, `type`, `sku_id`, `warehouse_id`) | Chống ghi trùng khi gọi lại |
+
+**`inventory_receipts`** + **`inventory_receipt_items`** — phiếu nhập kho từ nhà cung cấp.
+* `inventory_receipts`: `id`, `code` (UNIQUE, `GRN-YYMMDD-XXXX`), `warehouse_id`, `supplier_name`, `note`, `created_by`, `created_at`.
+* `inventory_receipt_items`: `id`, `receipt_id` (FK, CASCADE), `sku_id`, `quantity`, `cost_price` (DECIMAL(15,2) – giá vốn); UNIQUE (`receipt_id`, `sku_id`).
+
 ---
 
-## 4. `order_db` (PostgreSQL - Service Order & Inventory)
+## 4. `order_db` (PostgreSQL - Service Order)
 
 ### 4.1. Bảng `orders` (Thông tin đơn hàng trung tâm)
 | Cột | Kiểu Dữ Liệu | Ràng Buộc | Ý Nghĩa / Mô Tả |
@@ -184,16 +243,21 @@
 | `changed_by` | VARCHAR(100) | NOT NULL | User ID hoặc `SYSTEM` / `PAYMENT_WEBHOOK` |
 | `created_at` | TIMESTAMP | Default `NOW()` | Thời gian ghi nhận |
 
-### 4.4. Bảng `inventory_reservations` (Lưu vết giữ hàng SAGA)
+### 4.4. Bảng `stock_sync_tasks` (Đồng bộ thao tác kho với Product Service)
+Order Service không truy cập `product_db`. Mỗi thao tác kho sau khi đơn đã tồn tại được ghi thành task **trong cùng transaction** đổi trạng thái đơn, rồi gọi gRPC `InventoryService`; `StockSyncWorker` thử lại task lỗi (dạng đơn giản của Transactional Outbox — xem `docs/06` mục 5.1). Bảng `inventory_reservations` cũ của `order_db` đã bị xóa (giữ hàng nằm ở `product_db`, mục 3.9).
+
 | Cột | Kiểu Dữ Liệu | Ràng Buộc | Ý Nghĩa / Mô Tả |
 | :--- | :--- | :--- | :--- |
-| `id` | UUID | PK | Định danh reservation |
-| `order_id` | UUID | NOT NULL (INDEX) | Đơn hàng đang giữ kho |
-| `sku_id` | UUID | NOT NULL (INDEX) | SKU đang giữ |
-| `quantity` | INT | NOT NULL | Số lượng giữ |
-| `status` | ENUM | Default `HOLD` | `HOLD`, `COMMITTED`, `RELEASED` |
-| `expires_at` | TIMESTAMP | NOT NULL | Hạn tạm giữ (15 phút) |
-| `created_at` | TIMESTAMP | Default `NOW()` | Thời điểm tạo |
+| `id` | UUID | PK | Định danh task |
+| `seq` | INT | UNIQUE, autoincrement | Thứ tự xử lý chắc chắn trong cùng đơn |
+| `order_id` | UUID | FK -> `orders.id` (CASCADE) | Đơn hàng |
+| `action` | ENUM | NOT NULL | `COMMIT`, `RELEASE`, `SHIP`, `RETURN` |
+| `status` | ENUM | Default `PENDING` (INDEX cùng `next_retry_at`) | `PENDING`, `DONE`, `FAILED` (quá 20 lần thử → admin xử lý thủ công) |
+| `attempts` | INT | Default `0` | Số lần đã thử |
+| `next_retry_at` | TIMESTAMP | Default `NOW()` | Lần thử tiếp theo (backoff 30 giây → tối đa 10 phút) |
+| `last_error` | TEXT | NULLABLE | Lỗi gần nhất (hiển thị trên trang admin đơn hàng) |
+| `performed_by` | VARCHAR(100) | NOT NULL | Người / hệ thống thực hiện |
+| `payload` | JSONB | NULLABLE | Tham số bổ sung (vd lý do nhả hàng) |
 
 ### 4.5. Bảng `vouchers` & `voucher_usages`
 * **`vouchers`**: `id` (PK), `code` (UNIQUE), `discount_type` (`PERCENTAGE`/`FIXED_AMOUNT`), `discount_value`, `min_order_amount`, `max_discount_amount`, `total_usage_limit`, `current_usage_count`, `per_user_limit`, `start_date`, `end_date`, `is_active`.
@@ -279,7 +343,6 @@
 | Key Pattern | Cấu Trúc | TTL | Mô Tả Nghiệp Vụ |
 | :--- | :--- | :--- | :--- |
 | `cart:{customer_id}` | **Hash** | 30 ngày | Lưu giỏ hàng tạm thời dạng `{ [sku_id]: { qty, price, added_at } }` |
-| `stock:{sku_id}` | **String / Int** | Không TTL | Tồn kho tức thì phục vụ kiểm tra và trừ tồn Atomic |
-| `lock:stock:{sku_id}` | **String** | 5 giây | Khóa phân tán (Redlock) khi thực hiện đồng bộ tồn kho |
+| `stock:{sku_id}` | **String / Int** | Không TTL | Số **còn bán được** (`on_hand − reserved − held`, mọi kho). Chỉ Product Service ghi: giữ hàng bằng Lua script nguyên tử, hoàn trả bằng `INCRBY`; key thiếu được khởi tạo từ `inventory_stocks`, đối soát toàn bộ khi service khởi động / admin bấm "Đối soát" |
 | `voucher:{code}:count`| **Integer** | Theo hạn | Đếm lượt dùng mã giảm giá nguyên tử |
 | `rate_limit:{ip}:{path}`| **Integer** | 60 giây | Đếm số request để chặn DDoS / Spam API tại Gateway |

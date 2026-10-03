@@ -1,7 +1,7 @@
 # 06. Kế Hoạch Triển Khai Quản Lý Kho (WMS Implementation Plan)
 
 > Kế hoạch chi tiết cho Giai đoạn 5 – phân hệ Quản lý kho, đồng thời gom toàn bộ logic tồn kho về Product Service để xử lý các lỗi lệch tồn hiện có.
-> Trạng thái: **Chờ duyệt** · Tạo ngày 2026-10-02
+> Trạng thái: **Hoàn thành** (Bước 0 → 5, 2026-10-03) · Tạo ngày 2026-10-02
 
 ---
 
@@ -184,9 +184,15 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - `/admin/orders`: nút "Xác nhận xuất kho" (đơn `CONFIRMED` → `SHIPPING`) và "Nhận hàng hoàn".
 - `/admin/products`: modal sửa nhanh tồn kho → điều chỉnh kiểm kê (nhập chênh lệch + lý do).
 
-### Bước 5 — Tài liệu & dọn dẹp ⏳ *(chi tiết ở mục 8)*
+### Bước 5 — Tài liệu & dọn dẹp ✅ *(hoàn thành 2026-10-03, đã migrate dev)*
 - Cập nhật `docs/02-database-design.md`, `docs/01-system-architecture.md`, `docs/05-roadmap.md`, `CLAUDE.md`.
-- Migration dọn dẹp: xóa cột `product_skus.stock_quantity`.
+- Migration dọn dẹp `product_db` (`20261003150000_drop_legacy_stock_quantity`): tạo kho mặc định `HCM-01` nếu chưa có; **chặn** (RAISE EXCEPTION) nếu còn SKU có tồn ở cột cũ mà chưa có `inventory_stocks`; xóa cột `product_skus.stock_quantity`.
+- Migration `order_db` (`20261003150000_drop_legacy_inventory_reservations`): xóa bảng `inventory_reservations` + enum `ReservationStatus` cũ.
+- Bỏ luồng "chưa bật WMS": `InventoryService.getDefaultWarehouseId()` báo `FAILED_PRECONDITION` nếu thiếu kho mặc định; `setOnHand` báo `NOT_FOUND` nếu SKU chưa có dòng tồn; `getAvailableStocks` tính từ database khi Redis lỗi. `CatalogService` không còn kết nối Redis riêng; `UpdateSkuStock` trả về số còn bán được.
+- Xóa script `backfill-inventory.js` + test (xem lịch sử git trước commit dọn dẹp nếu cần chuyển đổi môi trường khác); test product-service không còn dùng `order_db_test`.
+- Seed (`seed-*.js`) nhập tồn đầu kỳ qua `seed-inventory.js` (`inventory_stocks` + giao dịch `INBOUND` ref `OPENING/SEED`, không ghi đè SKU đã có tồn); `seed-products.js` upsert SKU theo `skuCode` thay vì xóa – tạo lại (SKU bị sổ kho tham chiếu, `ON DELETE RESTRICT`).
+- Sửa lỗi phát hiện khi chạy test song song: `stock_sync_tasks.next_retry_at` lấy `now()` của database (nhanh hơn Node 1–2 ms) → task vừa ghi bị coi là chưa đến hạn, phải chờ worker 30 giây. `StockSyncService.enqueue` ghi `nextRetryAt` bằng đồng hồ của service.
+- Backup trước migrate: `backups/{product,order}_db-before-wms-cleanup-20261003-223020.sql`.
 
 ## 7. Rủi Ro & Lưu Ý
 
@@ -197,16 +203,16 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - **Hướng nâng cấp sau — Transactional Outbox + RabbitMQ**: thay `StockSyncWorker` gọi gRPC bằng tiến trình đẩy sự kiện từ `stock_sync_tasks` lên RabbitMQ, Product Service tiêu thụ qua consumer có DLQ. Lợi ích: hai service không cần cùng hoạt động tại một thời điểm. Để thành giai đoạn riêng (gắn với mục Transactional Outbox ở Giai đoạn 4 trong roadmap).
 - Payment Service → Order Service (`ProcessPaymentSuccess`/`Failed`) vẫn là gọi gRPC đồng bộ; trường hợp gọi thất bại đã được VNPAY gửi lại IPN và trang kết quả thanh toán gọi lại, nên ngoài phạm vi kế hoạch này.
 
-## 8. Bàn Giao Cho Phiên Làm Việc Tiếp Theo *(cập nhật 2026-10-03)*
+## 8. Bàn Giao & Tổng Kết *(cập nhật 2026-10-03 – WMS hoàn thành)*
 
-> Đọc mục này là đủ để làm tiếp, không cần lịch sử hội thoại cũ. Luồng đặt hàng đầy đủ xem mục 5.1 + bảng "Thiết kế đã chốt" ở Bước 3.
+> Mục 8.2 / 8.3 giữ lại làm tham khảo. Luồng đặt hàng đầy đủ xem mục 5.1 + bảng "Thiết kế đã chốt" ở Bước 3.
 
 ### 8.1. Trạng thái hiện tại
-- **Bước 0 → 3 đã xong và đã chuyển đổi dữ liệu dev.** WMS đang bật (kho mặc định `HCM-01`). Backfill **đã chạy** — không chạy lại trên dev trừ khi seed thêm SKU mới (script idempotent theo SKU).
+- **Bước 0 → 5 đã xong, dev đã migrate dọn dẹp** (không còn `product_skus.stock_quantity`, không còn `order_db.inventory_reservations`). Kho mặc định `HCM-01`.
 - Tồn kho chỉ do product-service quản lý (`InventoryService`, 12 RPC, package gRPC `inventory`, cổng :50052). Order-service không còn kết nối `product_db` / Redis; mọi thao tác kho sau khi tạo đơn đi qua `stock_sync_tasks` + `StockSyncWorker`.
-- Test: product-service 93, order-service 48 (`pnpm turbo run test`, cần Docker). Kiểm thử end-to-end trên hệ thống thật đã pass 7 kịch bản (xem Bước 3c).
-- **Việc dở dang:** không có code dở dang. Đầu phiên chạy `git status`; nếu còn thay đổi ở `CLAUDE.md` / file này thì đó là phần bàn giao chưa commit (`docs(wms): thêm hướng dẫn bàn giao cho bước 4 và 5`).
-- Dữ liệu test còn lại trên dev: 6 đơn của `admin@novatech.com` có ghi chú "Đơn test tự động WMS"; đơn `ORD-261003-D8Q6` đang CONFIRMED + PAID, giữ (`COMMITTED`) 1 cái `NV-SND-SLV` — dùng được để test nút "Bàn giao shipper" / "Nhận hàng hoàn" ở Bước 4.
+- Test: product-service 78, order-service 49 (`pnpm turbo run test`, cần Docker; chạy song song ổn định sau khi sửa `next_retry_at`).
+- Dữ liệu test còn lại trên dev: các đơn của `admin@novatech.com` có ghi chú "Đơn test tự động WMS"; đơn `ORD-261003-D8Q6` đã `RETURNED` (test luồng xuất kho → giao thất bại → nhận hàng hoàn); phiếu `GRN-261003-XO79` / `ADJ-261003-GWW5` bù trừ nhau.
+- **Việc còn mở (ngoài phạm vi WMS):** phân trang server cho `/admin/orders`; xuất file báo cáo xuất - nhập - tồn; nâng `StockSyncWorker` lên Transactional Outbox + RabbitMQ (mục 7).
 
 ### 8.2. Bước 4 — việc cần làm ✅ *(đã làm xong, giữ lại để tham khảo)*
 > Kết quả: module `apps/api-gateway/src/inventory`, `inventoryService.ts`, trang `/admin/inventory` (`_components/`), sửa `/admin/orders` (badge + thử lại đồng bộ kho, giao thất bại, nhận hàng hoàn, tab `RETURNED`), `/admin/products` (modal nạp tồn thực tế từ kho), trang khách hiển thị `RETURNED`. Lưu ý: `AdjustStock` từ chối giảm vượt **số còn bán** (không chỉ vượt `reserved`). Dữ liệu test trên dev: phiếu `GRN-261003-XO79` (+1 `NV-SND-BLK`) và `ADJ-261003-GWW5` (−1) bù trừ nhau. Còn tồn đọng: trang `/admin/orders` vẫn tải tối đa 50 đơn (order-service giới hạn `limit` 50) và lọc phía client, chưa có thanh phân trang.
@@ -239,7 +245,7 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
 - `apps/storefront/src/app/admin/products/page.tsx`: modal "sửa nhanh tồn kho" hiện đặt **tồn thực tế mới** (backend tự ghi phiếu điều chỉnh, từ chối nếu thấp hơn phần đã giữ/chốt) — đổi nhãn cho rõ, hiển thị lỗi 409; cột tồn trong bảng là **số còn bán được**.
 - Theo `AGENTS.md`: **hỏi người dùng trước khi mở trình duyệt để test**.
 
-### 8.3. Bước 5 — việc cần làm
+### 8.3. Bước 5 — việc cần làm ✅ *(đã làm xong – kết quả ở Bước 5, mục 6)*
 - Tài liệu: `docs/02-database-design.md` (bảng kho mới, `stock_sync_tasks`, bỏ `inventory_reservations` khỏi order_db), `docs/01-system-architecture.md` (InventoryService, luồng đồng bộ kho), `docs/05-roadmap.md` (tick WMS ở Giai đoạn 5).
 - Dọn dẹp code luồng cũ trong product-service: nhánh "chưa bật WMS" ở `catalog.service.ts` (`createProduct`, `updateSkuStock`, `resolveSkuStocks`), giá trị `null` của `InventoryService.setOnHand / getAvailableStocks`, test `test.failing` lỗi #1 trong `admin-products.spec.ts`.
 - Migration `product_db`: xóa cột `product_skus.stock_quantity`; sửa các file seed (`packages/database/prisma/seed-*.js`) để tạo tồn qua `inventory_stocks` + giao dịch INBOUND tồn đầu kỳ.

@@ -16,6 +16,7 @@ for (const p of envPaths) {
 }
 
 const { PrismaClient } = require('../src/generated/product-client');
+const { ensureOpeningStock } = require('./seed-inventory');
 
 const prisma = new PrismaClient({
   datasources: {
@@ -428,9 +429,8 @@ async function seed() {
       productId = created.id;
     }
 
-    // Xóa và tạo lại images, skus, specs
+    // Xóa và tạo lại images, specs (SKU được upsert theo skuCode: tồn kho và sổ kho tham chiếu tới SKU nên không xóa)
     await prisma.productImage.deleteMany({ where: { productId } });
-    await prisma.productSku.deleteMany({ where: { productId } });
     await prisma.productSpec.deleteMany({ where: { productId } });
 
     // Tạo Images
@@ -445,22 +445,24 @@ async function seed() {
       });
     }
 
-    // Tạo SKUs
+    // Tạo / cập nhật SKUs, nhập tồn đầu kỳ vào kho mặc định cho SKU mới
     for (const sku of p.skus) {
-      await prisma.productSku.create({
-        data: {
-          productId,
-          skuCode: sku.skuCode,
-          name: sku.name,
-          colorName: sku.colorName,
-          colorHex: sku.colorHex,
-          price: sku.price,
-          originalPrice: sku.originalPrice,
-          stockQuantity: sku.stockQuantity,
-          imageUrl: sku.imageUrl,
-          specs: sku.specs,
-        },
+      const skuData = {
+        productId,
+        name: sku.name,
+        colorName: sku.colorName,
+        colorHex: sku.colorHex,
+        price: sku.price,
+        originalPrice: sku.originalPrice,
+        imageUrl: sku.imageUrl,
+        specs: sku.specs,
+      };
+      const savedSku = await prisma.productSku.upsert({
+        where: { skuCode: sku.skuCode },
+        update: skuData,
+        create: { ...skuData, skuCode: sku.skuCode },
       });
+      await ensureOpeningStock(prisma, savedSku.id, sku.stockQuantity);
     }
 
     // Tạo Specs

@@ -37,26 +37,31 @@
   * Quản lý phân quyền RBAC (`CUSTOMER`, `ADMIN`, `SUPPORT`).
   * Quản lý sổ địa chỉ giao hàng và thông tin cá nhân.
 
-### 2.3. Product & Catalog Service
-* **Cơ sở dữ liệu**: PostgreSQL (`product_db`) + Meilisearch.
+### 2.3. Product & Catalog Service (kèm Inventory / WMS)
+* **Cơ sở dữ liệu**: PostgreSQL (`product_db`) + Redis (`stock:{sku_id}`) + Meilisearch.
 * **Giao tiếp**:
-  * **Inbound**: gRPC (Lấy danh mục, danh sách sản phẩm, chi tiết SKU, kiểm tra giá).
+  * **Inbound**: gRPC cổng `50052` gồm 2 service:
+    * `ProductService` (package `product`): danh mục, danh sách sản phẩm, chi tiết SKU, quản trị sản phẩm.
+    * `InventoryService` (package `inventory`): giữ / chốt / nhả / xuất kho / nhận hàng hoàn theo đơn (gọi bởi Order Service), phiếu nhập, điều chỉnh kiểm kê, truy vấn tồn & sổ kho, đối soát Redis (gọi bởi API Gateway cho trang admin `/admin/inventory`).
   * **Outbound**: RabbitMQ (Phát event `ProductCreated`, `ProductUpdated`, `ProductDeleted`).
 * **Nhiệm vụ chính**:
   * Quản lý phân cấp danh mục (Category tree), thương hiệu (Brand).
-  * Quản lý sản phẩm cha và các biến thể SKU (Màu sắc, kích thước, ảnh đại diện, giá niêm yết, tồn kho cơ sở).
+  * Quản lý sản phẩm cha và các biến thể SKU (Màu sắc, kích thước, ảnh đại diện, giá niêm yết).
+  * **Nguồn dữ liệu tồn kho duy nhất**: tồn theo SKU × kho (`on_hand`, `reserved`), giữ hàng theo đơn, sổ xuất nhập tồn, phiếu nhập. Số còn bán được cache ở Redis và được giữ nguyên tử bằng Lua script cho mọi SKU của đơn. Mọi RPC thay đổi tồn đều idempotent theo mã đơn / mã chứng từ.
+  * Worker nền: nhả giữ hàng quá hạn (mỗi 30 giây), đối soát Redis lúc khởi động. Chi tiết: `docs/06-wms-implementation-plan.md`.
   * Tự động đồng bộ dữ liệu sang Meilisearch thông qua Worker lắng nghe sự kiện RabbitMQ.
 
-### 2.4. Order & Inventory Service (Core Orchestrator)
-* **Cơ sở dữ liệu**: PostgreSQL (`order_db`) + Redis (Distributed State).
+### 2.4. Order Service (Core Orchestrator)
+* **Cơ sở dữ liệu**: PostgreSQL (`order_db`). Không kết nối `product_db` hay Redis tồn kho.
 * **Giao tiếp**:
-  * **Inbound**: gRPC (Tạo đơn hàng, tra cứu lịch sử đơn hàng, cập nhật trạng thái).
-  * **Outbound/Bilateral**: RabbitMQ (Điều phối luồng SAGA Orchestration, nhận kết quả thanh toán).
+  * **Inbound**: gRPC (Tạo đơn hàng, tra cứu lịch sử đơn hàng, cập nhật trạng thái, thử lại đồng bộ kho).
+  * **Outbound**: gRPC tới `InventoryService` (Product Service) cho mọi thao tác kho; RabbitMQ (Điều phối luồng SAGA, nhận kết quả thanh toán).
 * **Nhiệm vụ chính**:
-  * Quản lý giỏ hàng tức thời (Cart) lưu trữ tại Redis Hash.
-  * **Inventory Reservation**: Giữ kho tạm thời (Hold stock) bằng Redis Lua script khi khách đặt hàng.
-  * **SAGA Orchestrator**: Điều phối toàn bộ trạng thái đơn hàng và kích hoạt giao dịch bù (Compensation) nếu thanh toán thất bại.
+  * Vòng đời đơn hàng: `PENDING → CONFIRMED → SHIPPING → DELIVERED`, hủy (`CANCELLED`), nhận hàng hoàn (`RETURNED`).
+  * **Giữ hàng lúc tạo đơn**: gọi `HoldStock` (VNPAY) / `CommitStock` (COD) **trước** khi ghi đơn; ghi đơn thất bại → `ReleaseStock` bù trừ.
+  * **Đồng bộ kho sau khi đơn tồn tại**: đổi trạng thái đơn và ghi task vào `stock_sync_tasks` trong cùng transaction, gọi `CommitStock` / `ReleaseStock` / `ShipStock` / `ReceiveReturn` ngay sau đó; `StockSyncWorker` thử lại với backoff, quá 20 lần → `FAILED` và cảnh báo trên trang admin đơn hàng.
   * Quản lý mã giảm giá (Voucher) và đếm lượt dùng nguyên tử (Atomic counter).
+* Giỏ hàng (Cart) hiện do API Gateway quản lý trực tiếp trên Redis Hash.
 
 ### 2.5. Payment Service
 * **Cơ sở dữ liệu**: PostgreSQL (`payment_db`).

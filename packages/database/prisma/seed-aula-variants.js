@@ -16,6 +16,7 @@ for (const p of envPaths) {
 }
 
 const { PrismaClient } = require('../src/generated/product-client');
+const { ensureOpeningStock } = require('./seed-inventory');
 
 const prisma = new PrismaClient({
   datasources: {
@@ -97,7 +98,7 @@ async function main() {
     ];
 
     for (const s of f75Skus) {
-      await prisma.productSku.upsert({
+      const savedSku = await prisma.productSku.upsert({
         where: { skuCode: s.skuCode },
         update: {
           productId: f75.id,
@@ -106,7 +107,6 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
           specs: s.specs,
         },
@@ -118,11 +118,11 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
           specs: s.specs,
         },
       });
+      await ensureOpeningStock(prisma, savedSku.id, s.stockQuantity);
     }
     console.log(` -> Đã thêm 5 biến thể màu & switch cho AULA F75!`);
   }
@@ -183,7 +183,7 @@ async function main() {
     ];
 
     for (const s of f87Skus) {
-      await prisma.productSku.upsert({
+      const savedSku = await prisma.productSku.upsert({
         where: { skuCode: s.skuCode },
         update: {
           productId: f87.id,
@@ -192,7 +192,6 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
           specs: s.specs,
         },
@@ -204,11 +203,11 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
           specs: s.specs,
         },
       });
+      await ensureOpeningStock(prisma, savedSku.id, s.stockQuantity);
     }
     console.log(` -> Đã thêm 4 biến thể màu & switch cho AULA F87 Pro!`);
   }
@@ -269,7 +268,7 @@ async function main() {
     ];
 
     for (const s of f99Skus) {
-      await prisma.productSku.upsert({
+      const savedSku = await prisma.productSku.upsert({
         where: { skuCode: s.skuCode },
         update: {
           productId: f99.id,
@@ -278,7 +277,6 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
           specs: s.specs,
         },
@@ -290,11 +288,11 @@ async function main() {
           colorHex: s.colorHex,
           price: s.price,
           originalPrice: s.originalPrice,
-          stockQuantity: s.stockQuantity,
           imageUrl: s.imageUrl,
           specs: s.specs,
         },
       });
+      await ensureOpeningStock(prisma, savedSku.id, s.stockQuantity);
     }
     console.log(` -> Đã thêm 4 biến thể màu & switch cho AULA F99!`);
   }
