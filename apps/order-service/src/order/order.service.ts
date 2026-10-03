@@ -1,9 +1,9 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { status } from '@grpc/grpc-js';
-import Redis from 'ioredis';
-import { PrismaOrderService } from '../prisma/prisma-order.service';
-import { ProductPrismaClient, OrderPrisma } from '@repo/database';
+import { randomUUID } from 'crypto';
+import { firstValueFrom, Observable, timeout } from 'rxjs';
+import { OrderPrisma } from '@repo/database';
 import {
   CreateOrderRequest,
   CreateOrderResponse,
@@ -13,27 +13,27 @@ import {
   GetOrdersByCustomerResponse,
   CancelOrderRequest,
   CancelOrderResponse,
+  InventoryServiceClient,
+  OrderSkuDto,
   ProcessPaymentSuccessRequest,
   ProcessPaymentSuccessResponse,
   ProcessPaymentFailedRequest,
   ProcessPaymentFailedResponse,
+  StockItem,
   UpdateDeliveryStatusRequest,
   UpdateDeliveryStatusResponse,
   OrderDto,
 } from '@repo/proto';
+import { PrismaOrderService } from '../prisma/prisma-order.service';
+import { INVENTORY_CLIENT } from '../stock-sync/inventory-client';
+import { errorMessageOf, grpcCodeOf, StockSyncService, StockSyncState } from '../stock-sync/stock-sync.service';
 
-export const RESERVE_STOCK_LUA = `
-local current_stock = tonumber(redis.call('get', KEYS[1]))
-local buy_qty = tonumber(ARGV[1])
+/** Thời gian giữ hàng chờ thanh toán trực tuyến (khớp với thời hạn thanh toán của đơn) */
+export const PAYMENT_WINDOW_SECONDS = 15 * 60;
+const RPC_TIMEOUT_MS = 10_000;
 
-if current_stock and current_stock >= buy_qty then
-    redis.call('decrby', KEYS[1], buy_qty)
-    return 1
-else
-    return 0
-end
-`;
-
+type OrderStatus = OrderPrisma.OrderStatus;
+type Tx = OrderPrisma.Prisma.TransactionClient;
 type OrderWithItems = OrderPrisma.Prisma.OrderGetPayload<{
   include: {
     items: true;
@@ -42,32 +42,38 @@ type OrderWithItems = OrderPrisma.Prisma.OrderGetPayload<{
   statusHistory?: OrderPrisma.Prisma.OrderStatusHistoryGetPayload<object>[];
 };
 
+const ORDER_INCLUDE = {
+  items: true,
+  statusHistory: { orderBy: { createdAt: 'asc' } },
+} as const;
+
+/** Đơn đã chốt nhưng chưa xuất kho: hủy thì nhả hàng */
+const CANCELLABLE_BEFORE_SHIPPING: OrderStatus[] = ['PENDING', 'CONFIRMED', 'PROCESSING'];
+
+function rpcError(code: status, message: string): RpcException {
+  return new RpcException({ code, message });
+}
+
+/** Thao tác trên đơn trùng với một thao tác khác vừa xảy ra (cập nhật có điều kiện không khớp) */
+function concurrentUpdateError(): RpcException {
+  return rpcError(status.ABORTED, 'Đơn hàng vừa được cập nhật bởi thao tác khác, vui lòng tải lại và thử lại');
+}
+
+/**
+ * Nghiệp vụ đơn hàng. Mọi thay đổi tồn kho đi qua InventoryService (Product Service):
+ * - Tạo đơn: giữ hàng đồng bộ TRƯỚC khi ghi đơn (cần trả lời khách còn hàng hay không).
+ * - Sau đó: đổi trạng thái đơn + ghi task kho trong CÙNG transaction, rồi StockSyncService gọi RPC và thử lại tới khi xong.
+ * Xem docs/06-wms-implementation-plan.md (mục 5.1 và thiết kế Bước 3).
+ */
 @Injectable()
-export class OrderService implements OnModuleDestroy {
-  private readonly redis: Redis;
-  private readonly productPrisma: ProductPrismaClient;
+export class OrderService {
+  private readonly logger = new Logger(OrderService.name);
 
-  constructor(private readonly prisma: PrismaOrderService) {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl, {
-      maxRetriesPerRequest: 3,
-    });
-
-    this.productPrisma = new ProductPrismaClient({
-      datasources: {
-        db: {
-          url:
-            process.env.PRODUCT_DATABASE_URL ||
-            'postgresql://postgres:postgrespassword@localhost:5432/product_db?schema=public',
-        },
-      },
-    });
-  }
-
-  async onModuleDestroy(): Promise<void> {
-    this.redis.disconnect();
-    await this.productPrisma.$disconnect();
-  }
+  constructor(
+    private readonly prisma: PrismaOrderService,
+    private readonly stockSync: StockSyncService,
+    @Inject(INVENTORY_CLIENT) private readonly inventory: InventoryServiceClient,
+  ) {}
 
   /**
    * Sinh mã đơn hàng theo chuẩn: ORD-YYMMDD-XXXX
@@ -90,102 +96,49 @@ export class OrderService implements OnModuleDestroy {
 
   async createOrder(data: CreateOrderRequest): Promise<CreateOrderResponse> {
     if (!data.items || data.items.length === 0) {
-      throw new RpcException({
-        code: status.INVALID_ARGUMENT,
-        message: 'Đơn hàng phải có ít nhất 1 sản phẩm',
-      });
+      throw rpcError(status.INVALID_ARGUMENT, 'Đơn hàng phải có ít nhất 1 sản phẩm');
     }
-
-    // 1. Kiểm tra và nạp thông tin SKU từ database sản phẩm
-    const skuIds = data.items.map((i) => i.sku_id);
-    const dbSkus = await this.productPrisma.productSku.findMany({
-      where: { id: { in: skuIds }, isActive: true },
-      include: { product: true },
-    });
-
-    if (dbSkus.length !== data.items.length) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: 'Một số sản phẩm hoặc biến thể không tồn tại hoặc đã ngừng kinh doanh',
-      });
-    }
-
-    const skuMap = new Map(dbSkus.map((s) => [s.id, s]));
-
-    // 2. Giữ kho nguyên tử (Atomic Inventory Reservation) qua Redis Lua Script
-    const reservedItems: { skuId: string; quantity: number }[] = [];
-
     for (const item of data.items) {
-      const sku = skuMap.get(item.sku_id);
-      if (!sku) continue;
-
-      const stockKey = `stock:${item.sku_id}`;
-
-      // Đồng bộ số lượng tồn từ DB sang Redis một cách nguyên tử (chỉ set nếu key chưa tồn tại)
-      await this.redis.set(stockKey, sku.stockQuantity, 'NX');
-
-      // Chạy Lua Script nguyên tử: Check và Decr
-      const result = await this.redis.eval(
-        RESERVE_STOCK_LUA,
-        1,
-        stockKey,
-        item.quantity,
-      );
-
-      if (result === 1) {
-        reservedItems.push({ skuId: item.sku_id, quantity: item.quantity });
-      } else {
-        // Rollback các món đã giữ trước đó
-        for (const reserved of reservedItems) {
-          await this.redis.incrby(`stock:${reserved.skuId}`, reserved.quantity);
-        }
-
-        throw new RpcException({
-          code: status.RESOURCE_EXHAUSTED,
-          message: `Sản phẩm "${sku.product.name} (${sku.name})" không đủ số lượng tồn kho`,
-        });
+      if (!item.sku_id || !Number.isInteger(item.quantity) || item.quantity <= 0) {
+        throw rpcError(status.INVALID_ARGUMENT, 'Số lượng sản phẩm phải là số nguyên dương');
       }
     }
+    const items = this.mergeItems(data.items);
 
-    // 3. Tính toán tổng tiền
+    // 1. Lấy giá và thông tin SKU từ Product Service
+    const { skus } = await this.callInventory(this.inventory.getSkusForOrder({ sku_ids: items.map((i) => i.sku_id) }));
+    const skuMap = new Map<string, OrderSkuDto>((skus || []).map((s) => [s.id, s]));
+    if (items.some((i) => !skuMap.get(i.sku_id)?.is_active)) {
+      throw rpcError(status.NOT_FOUND, 'Một số sản phẩm hoặc biến thể không tồn tại hoặc đã ngừng kinh doanh');
+    }
+
+    // 2. Tính tiền
     let subtotal = 0;
-    const orderItemsData = data.items.map((item) => {
+    const orderItemsData = items.map((item) => {
       const sku = skuMap.get(item.sku_id)!;
       const price = Number(sku.price);
       const totalItemPrice = price * item.quantity;
       subtotal += totalItemPrice;
-
       return {
         skuId: sku.id,
-        productId: sku.productId,
-        productName: sku.product.name,
-        skuName: sku.name,
+        productId: sku.product_id,
+        productName: sku.product_name,
+        skuName: sku.sku_name,
         unitPrice: price,
         quantity: item.quantity,
         totalPrice: totalItemPrice,
-        thumbnailUrl: sku.imageUrl || sku.product.thumbnailUrl,
+        thumbnailUrl: sku.thumbnail_url || null,
       };
     });
-
     const shippingFee = subtotal >= 500000 ? 0 : 30000;
     const discountAmount = 0;
     const totalAmount = subtotal + shippingFee - discountAmount;
 
-    // Parse địa chỉ giao hàng
     let shippingAddressJson: OrderPrisma.Prisma.InputJsonValue = {};
     try {
       shippingAddressJson = JSON.parse(data.shipping_address_json || '{}') as OrderPrisma.Prisma.InputJsonObject;
     } catch {
       shippingAddressJson = { address: data.shipping_address_json };
-    }
-
-    // 4. Lưu đơn hàng vào PostgreSQL qua Transaction
-    let orderCode = this.generateOrderCode();
-    // Đảm bảo mã đơn duy nhất
-    let codeExists = await this.prisma.order.findUnique({ where: { orderCode } });
-    while (codeExists) {
-      orderCode = this.generateOrderCode();
-      codeExists = await this.prisma.order.findUnique({ where: { orderCode } });
     }
 
     const validPaymentMethods: Record<string, OrderPrisma.PaymentMethod> = {
@@ -197,122 +150,90 @@ export class OrderService implements OnModuleDestroy {
     const paymentMethod = validPaymentMethods[data.payment_method] || OrderPrisma.PaymentMethod.COD;
     const isCod = paymentMethod === OrderPrisma.PaymentMethod.COD;
 
-    const initialOrderStatus = isCod
-      ? OrderPrisma.OrderStatus.CONFIRMED
-      : OrderPrisma.OrderStatus.PENDING;
-    const initialPaymentStatus = OrderPrisma.PaymentStatus.PENDING;
-    const reservationStatus = isCod
-      ? OrderPrisma.ReservationStatus.COMMITTED
-      : OrderPrisma.ReservationStatus.HOLD;
-    const expiresAt = isCod ? null : new Date(Date.now() + 15 * 60 * 1000);
+    // 3. Sinh sẵn id / mã đơn để giữ hàng trước khi ghi đơn
+    const orderId = randomUUID();
+    let orderCode = this.generateOrderCode();
+    while (await this.prisma.order.findUnique({ where: { orderCode }, select: { id: true } })) {
+      orderCode = this.generateOrderCode();
+    }
+
+    // 4. Giữ hàng nguyên tử cho mọi SKU (hết hàng → lỗi trả thẳng cho khách, chưa ghi gì)
+    await this.callInventory(
+      this.inventory.holdStock({ order_id: orderId, order_code: orderCode, items, ttl_seconds: PAYMENT_WINDOW_SECONDS }),
+    );
+
+    // 5. Ghi đơn (COD: chốt luôn bằng task COMMIT trong cùng transaction)
+    const initialOrderStatus = isCod ? OrderPrisma.OrderStatus.CONFIRMED : OrderPrisma.OrderStatus.PENDING;
     const initialNote = isCod
       ? 'Đơn hàng COD được xác nhận tự động - Đã chốt giữ tồn kho'
       : 'Khách hàng đặt hàng thành công - Chờ thanh toán trực tuyến trong 15 phút';
 
-    const order: OrderWithItems = await this.prisma.$transaction(async (tx): Promise<OrderWithItems> => {
-      const createdOrder = await tx.order.create({
-        data: {
-          orderCode,
-          customerId: data.customer_id,
-          customerName: data.customer_name,
-          customerPhone: data.customer_phone,
-          customerEmail: data.customer_email,
-          shippingAddress: shippingAddressJson,
-          subtotalAmount: subtotal,
-          discountAmount,
-          shippingFee,
-          totalAmount,
-          paymentMethod,
-          paymentStatus: initialPaymentStatus,
-          orderStatus: initialOrderStatus,
-          voucherCode: data.voucher_code || undefined,
-          trackingCode: `GHN${Date.now().toString().slice(-8)}${Math.floor(1000 + Math.random() * 9000)}`,
-          carrierName: 'Giao Hàng Nhanh (GHN)',
-          shippingMethod: 'STANDARD',
-          items: {
-            create: orderItemsData,
-          },
-          statusHistory: {
-            create: {
-              fromStatus: 'NONE',
-              toStatus: initialOrderStatus,
-              note: data.note || initialNote,
-              location: 'Kho tổng Novatech Logistics',
-              changedBy: data.customer_id || 'CUSTOMER',
+    let order: OrderWithItems;
+    try {
+      order = await this.prisma.$transaction(async (tx): Promise<OrderWithItems> => {
+        const created = await tx.order.create({
+          data: {
+            id: orderId,
+            orderCode,
+            customerId: data.customer_id,
+            customerName: data.customer_name,
+            customerPhone: data.customer_phone,
+            customerEmail: data.customer_email,
+            shippingAddress: shippingAddressJson,
+            subtotalAmount: subtotal,
+            discountAmount,
+            shippingFee,
+            totalAmount,
+            paymentMethod,
+            paymentStatus: OrderPrisma.PaymentStatus.PENDING,
+            orderStatus: initialOrderStatus,
+            voucherCode: data.voucher_code || undefined,
+            note: data.note || null,
+            trackingCode: `GHN${Date.now().toString().slice(-8)}${Math.floor(1000 + Math.random() * 9000)}`,
+            carrierName: 'Giao Hàng Nhanh (GHN)',
+            shippingMethod: 'STANDARD',
+            items: { create: orderItemsData },
+            statusHistory: {
+              create: {
+                fromStatus: 'NONE',
+                toStatus: initialOrderStatus,
+                note: data.note || initialNote,
+                location: 'Kho tổng Novatech Logistics',
+                changedBy: data.customer_id || 'CUSTOMER',
+              },
             },
           },
-        },
-        include: {
-          items: true,
-          statusHistory: true,
-        },
+          include: ORDER_INCLUDE,
+        });
+        if (isCod) {
+          await this.stockSync.enqueue(tx, orderId, 'COMMIT', 'SYSTEM_COD');
+        }
+        return created;
       });
-
-      // Tạo bản ghi giữ hàng (SAGA Reservation)
-      for (const item of data.items) {
-        await tx.inventoryReservation.create({
-          data: {
-            orderId: createdOrder.id,
-            skuId: item.sku_id,
-            quantity: item.quantity,
-            status: reservationStatus,
-            expiresAt,
-          },
-        });
-      }
-
-      return createdOrder;
-    });
-
-    // Với đơn COD (xác nhận ngay), trừ cứng tồn kho vật lý trong PostgreSQL product_db
-    if (isCod) {
-      for (const item of data.items) {
-        await this.productPrisma.productSku.update({
-          where: { id: item.sku_id },
-          data: {
-            stockQuantity: {
-              decrement: item.quantity,
-            },
-          },
-        });
-      }
+    } catch (err: unknown) {
+      // Bù trừ: nhả hàng vừa giữ. Nếu cũng lỗi thì lượt giữ hàng tự hết hạn sau PAYMENT_WINDOW_SECONDS
+      await this.callInventory(this.inventory.releaseStock({ order_id: orderId, reason: 'Ghi đơn hàng thất bại' })).catch(
+        (releaseErr: unknown) =>
+          this.logger.error(`Không nhả được giữ hàng của đơn lỗi ${orderCode}: ${errorMessageOf(releaseErr)}`),
+      );
+      throw err;
     }
+
+    if (isCod) await this.stockSync.processOrder(orderId);
 
     return {
       success: true,
       message: 'Đặt hàng thành công',
-      order: this.mapOrderToDto(order),
+      order: await this.toDto(order),
     };
   }
 
   async getOrderById(data: GetOrderByIdRequest): Promise<GetOrderByIdResponse> {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.order_id);
-    let order: OrderWithItems | null = null;
-
-    if (isUuid) {
-      order = await this.prisma.order.findUnique({
-        where: { id: data.order_id },
-        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
-      });
-    }
-
+    const order = await this.findOrder(data.order_id);
     if (!order) {
-      order = await this.prisma.order.findUnique({
-        where: { orderCode: data.order_id },
-        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
-      });
+      throw rpcError(status.NOT_FOUND, 'Không tìm thấy đơn hàng');
     }
-
-    if (!order) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: 'Không tìm thấy đơn hàng',
-      });
-    }
-
-    return {
-      order: this.mapOrderToDto(order),
-    };
+    return { order: await this.toDto(order) };
   }
 
   async getOrdersByCustomer(data: GetOrdersByCustomerRequest): Promise<GetOrdersByCustomerResponse> {
@@ -329,375 +250,336 @@ export class OrderService implements OnModuleDestroy {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
+        include: ORDER_INCLUDE,
       }),
     ]);
 
+    const states = await this.stockSync.getSyncStates(orders.map((o) => o.id));
     return {
-      orders: orders.map((o) => this.mapOrderToDto(o)),
+      orders: orders.map((o) => this.mapOrderToDto(o, states.get(o.id))),
       total,
     };
   }
 
+  /** Khách hủy đơn: chỉ khi chưa xuất kho; nhả hàng qua task RELEASE */
   async cancelOrder(data: CancelOrderRequest): Promise<CancelOrderResponse> {
-    const order = await this.prisma.order.findUnique({
-      where: { id: data.order_id },
-      include: { items: true },
-    });
-
+    const order = await this.prisma.order.findUnique({ where: { id: data.order_id } });
     if (!order) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: 'Không tìm thấy đơn hàng để hủy',
-      });
+      throw rpcError(status.NOT_FOUND, 'Không tìm thấy đơn hàng để hủy');
     }
-
     if (order.orderStatus === 'CANCELLED') {
       return { success: true, message: 'Đơn hàng đã được hủy trước đó' };
     }
-
-    if (order.orderStatus === 'SHIPPING' || order.orderStatus === 'DELIVERED') {
-      throw new RpcException({
-        code: status.FAILED_PRECONDITION,
-        message: 'Không thể hủy đơn hàng đang giao hoặc đã hoàn thành',
-      });
+    if (!CANCELLABLE_BEFORE_SHIPPING.includes(order.orderStatus)) {
+      throw rpcError(status.FAILED_PRECONDITION, 'Không thể hủy đơn hàng đang giao hoặc đã hoàn thành');
     }
 
-    // Cập nhật trạng thái trong PostgreSQL và giải phóng reservation nguyên tử
-    const releasedCount = await this.prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          orderStatus: 'CANCELLED',
-          cancelReason: data.reason || 'Khách hàng yêu cầu hủy',
-          statusHistory: {
-            create: {
-              fromStatus: order.orderStatus,
-              toStatus: 'CANCELLED',
-              note: data.reason || 'Hủy đơn hàng',
-              changedBy: data.customer_id || 'CUSTOMER',
-            },
-          },
-        },
+    const reason = data.reason || 'Khách hàng yêu cầu hủy';
+    await this.prisma.$transaction(async (tx) => {
+      await this.transition(tx, order, 'CANCELLED', {
+        data: { cancelReason: reason },
+        note: data.reason || 'Hủy đơn hàng',
+        changedBy: data.customer_id || 'CUSTOMER',
       });
-
-      const res = await tx.inventoryReservation.updateMany({
-        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
-        data: { status: OrderPrisma.ReservationStatus.RELEASED },
-      });
-
-      return res.count;
+      await this.stockSync.enqueue(tx, order.id, 'RELEASE', data.customer_id || 'CUSTOMER', { reason });
     });
+    await this.stockSync.processOrder(order.id);
 
-    // Chỉ hoàn lại tồn kho trên Redis nếu reservation thực sự vừa được chuyển từ HOLD sang RELEASED
-    if (releasedCount > 0) {
-      for (const item of order.items) {
-        await this.safeRestoreRedisStock(item.skuId, item.quantity);
-      }
-    }
-
-    // Nếu đơn hàng đã từng được CONFIRMED (đã trừ kho vật lý), hoàn lại tồn kho trong PostgreSQL
-    if (order.orderStatus === OrderPrisma.OrderStatus.CONFIRMED) {
-      for (const item of order.items) {
-        await this.productPrisma.productSku.update({
-          where: { id: item.skuId },
-          data: {
-            stockQuantity: {
-              increment: item.quantity,
-            },
-          },
-        });
-      }
-    }
-
-    return {
-      success: true,
-      message: 'Hủy đơn hàng thành công và đã nhả lại tồn kho',
-    };
+    return { success: true, message: 'Hủy đơn hàng thành công và đã nhả lại tồn kho' };
   }
 
+  /**
+   * Thanh toán thành công (IPN / trang kết quả – có thể gọi trùng):
+   * - Đơn PENDING, hoặc đã bị hủy do quá hạn → CONFIRMED + chốt hàng (task COMMIT; hết hàng → cảnh báo cho admin).
+   * - Đơn đã được admin xác nhận trước khi thanh toán → chỉ ghi nhận đã thanh toán.
+   */
   async processPaymentSuccess(data: ProcessPaymentSuccessRequest): Promise<ProcessPaymentSuccessResponse> {
-    const order = await this.prisma.order.findUnique({
-      where: { orderCode: data.order_code },
-      include: { items: true },
-    });
+    // Thử lại khi đơn vừa bị thao tác khác đổi trạng thái (vd worker hủy do quá hạn đúng lúc này)
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const result = await this.tryApplyPaymentSuccess(data);
+      if (result) return result;
+    }
+    throw concurrentUpdateError();
+  }
 
+  /** Trả null nếu đơn vừa bị đổi trạng thái giữa lúc đọc và lúc cập nhật (cần đọc lại) */
+  private async tryApplyPaymentSuccess(
+    data: ProcessPaymentSuccessRequest,
+  ): Promise<ProcessPaymentSuccessResponse | null> {
+    const order = await this.prisma.order.findUnique({ where: { orderCode: data.order_code } });
     if (!order) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: `Không tìm thấy đơn hàng mã: ${data.order_code}`,
-      });
+      throw rpcError(status.NOT_FOUND, `Không tìm thấy đơn hàng mã: ${data.order_code}`);
     }
 
     if (order.paymentStatus === OrderPrisma.PaymentStatus.PAID) {
       return {
         success: true,
         message: 'Đơn hàng đã được ghi nhận thanh toán thành công trước đó',
-        order: this.mapOrderToDto(order),
+        order: await this.toDto((await this.findOrder(order.id))!),
       };
     }
 
-    // SAGA Step: Chốt đơn hàng và chuyển trạng thái giữ kho sang COMMITTED vĩnh viễn
-    const updatedOrder = await this.prisma.$transaction(async (tx) => {
-      const ord = await tx.order.update({
-        where: { id: order.id },
+    const reinstate = order.orderStatus === 'PENDING' || order.orderStatus === 'CANCELLED';
+    const paymentNote = `Thanh toán thành công qua ${data.payment_method || 'VNPAY'} (Mã GD: ${data.transaction_no})`;
+
+    const applied = await this.prisma.$transaction(async (tx) => {
+      // Điều kiện "chưa thanh toán" chống ghi nhận trùng khi IPN và trang kết quả cùng gọi
+      const res = await tx.order.updateMany({
+        where: { id: order.id, paymentStatus: { not: OrderPrisma.PaymentStatus.PAID }, orderStatus: order.orderStatus },
         data: {
           paymentStatus: OrderPrisma.PaymentStatus.PAID,
-          orderStatus: OrderPrisma.OrderStatus.CONFIRMED,
-          statusHistory: {
-            create: {
-              fromStatus: order.orderStatus,
-              toStatus: OrderPrisma.OrderStatus.CONFIRMED,
-              note: `Thanh toán thành công qua ${data.payment_method || 'VNPAY'} (Mã GD: ${data.transaction_no})`,
-              changedBy: 'PAYMENT_SERVICE',
-            },
-          },
+          ...(reinstate ? { orderStatus: OrderPrisma.OrderStatus.CONFIRMED, cancelReason: null } : {}),
         },
-        include: { items: true },
       });
+      if (res.count === 0) return false;
 
-      await tx.inventoryReservation.updateMany({
-        where: {
-          orderId: order.id,
-          status: OrderPrisma.ReservationStatus.HOLD,
-        },
+      await tx.orderStatusHistory.create({
         data: {
-          status: OrderPrisma.ReservationStatus.COMMITTED,
-          expiresAt: null,
+          orderId: order.id,
+          fromStatus: order.orderStatus,
+          toStatus: reinstate ? OrderPrisma.OrderStatus.CONFIRMED : order.orderStatus,
+          note:
+            order.orderStatus === 'CANCELLED'
+              ? `${paymentNote} – Khôi phục đơn đã hủy do quá hạn thanh toán`
+              : paymentNote,
+          changedBy: 'PAYMENT_SERVICE',
         },
       });
-
-      return ord;
+      if (reinstate) {
+        await this.stockSync.enqueue(tx, order.id, 'COMMIT', 'PAYMENT_SERVICE');
+      }
+      return true;
     });
 
-    // SAGA: Thanh toán trực tuyến thành công -> trừ cứng tồn kho vật lý trong PostgreSQL product_db
-    for (const item of order.items) {
-      await this.productPrisma.productSku.update({
-        where: { id: item.skuId },
-        data: {
-          stockQuantity: {
-            decrement: item.quantity,
-          },
-        },
-      });
-    }
+    if (!applied) return null;
+    await this.stockSync.processOrder(order.id);
 
     return {
       success: true,
       message: 'Xác nhận thanh toán đơn hàng thành công',
-      order: this.mapOrderToDto(updatedOrder),
+      order: await this.toDto((await this.findOrder(order.id))!),
     };
   }
 
+  /** Thanh toán thất bại: chỉ hủy đơn còn chờ thanh toán, nhả hàng qua task RELEASE */
   async processPaymentFailed(data: ProcessPaymentFailedRequest): Promise<ProcessPaymentFailedResponse> {
-    const order = await this.prisma.order.findUnique({
-      where: { orderCode: data.order_code },
-      include: { items: true },
-    });
-
+    const order = await this.prisma.order.findUnique({ where: { orderCode: data.order_code } });
     if (!order) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: `Không tìm thấy đơn hàng mã: ${data.order_code}`,
-      });
+      throw rpcError(status.NOT_FOUND, `Không tìm thấy đơn hàng mã: ${data.order_code}`);
     }
-
     if (order.orderStatus === OrderPrisma.OrderStatus.CANCELLED) {
-      return {
-        success: true,
-        message: 'Đơn hàng đã ở trạng thái hủy trước đó',
-      };
+      return { success: true, message: 'Đơn hàng đã ở trạng thái hủy trước đó' };
+    }
+    if (order.orderStatus !== OrderPrisma.OrderStatus.PENDING || order.paymentStatus === OrderPrisma.PaymentStatus.PAID) {
+      return { success: true, message: 'Đơn hàng không còn chờ thanh toán, bỏ qua thông báo thất bại' };
     }
 
-    // 1. Cập nhật trạng thái đơn hàng CANCELLED và giải phóng Reservation RELEASED trong PostgreSQL
-    const releasedCount = await this.prisma.$transaction(async (tx) => {
-      await tx.order.update({
-        where: { id: order.id },
-        data: {
-          paymentStatus: OrderPrisma.PaymentStatus.FAILED,
-          orderStatus: OrderPrisma.OrderStatus.CANCELLED,
-          cancelReason: data.reason || 'Thanh toán trực tuyến thất bại hoặc bị hủy bởi người dùng',
-          statusHistory: {
-            create: {
-              fromStatus: order.orderStatus,
-              toStatus: OrderPrisma.OrderStatus.CANCELLED,
-              note: `Thanh toán thất bại: ${data.reason || 'Hủy giao dịch'} - Hệ thống đã nhả lại tồn kho`,
-              changedBy: 'PAYMENT_SERVICE',
-            },
-          },
-        },
+    const reason = data.reason || 'Thanh toán trực tuyến thất bại hoặc bị hủy bởi người dùng';
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await this.transition(tx, order, 'CANCELLED', {
+          data: { paymentStatus: OrderPrisma.PaymentStatus.FAILED, cancelReason: reason },
+          note: `Thanh toán thất bại: ${data.reason || 'Hủy giao dịch'} - Hệ thống đã nhả lại tồn kho`,
+          changedBy: 'PAYMENT_SERVICE',
+        });
+        await this.stockSync.enqueue(tx, order.id, 'RELEASE', 'PAYMENT_SERVICE', { reason });
       });
-
-      const res = await tx.inventoryReservation.updateMany({
-        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
-        data: { status: OrderPrisma.ReservationStatus.RELEASED },
-      });
-
-      return res.count;
-    });
-
-    // 2. SAGA Compensating: Chỉ nhả tồn kho Redis nếu reservation vừa được giải phóng từ HOLD -> RELEASED
-    if (releasedCount > 0) {
-      for (const item of order.items) {
-        await this.safeRestoreRedisStock(item.skuId, item.quantity);
-      }
+    } catch (err: unknown) {
+      // Một thông báo khác (vd thanh toán thành công) vừa cập nhật đơn trước
+      if (err instanceof RpcException) return { success: true, message: 'Đơn hàng vừa được cập nhật, bỏ qua' };
+      throw err;
     }
+    await this.stockSync.processOrder(order.id);
 
-    return {
-      success: true,
-      message: 'Hủy đơn hàng và giải phóng giữ kho thành công',
-    };
+    return { success: true, message: 'Hủy đơn hàng và giải phóng giữ kho thành công' };
   }
 
   /**
-   * Hoàn lại tồn kho trên Redis có chặn trần (Ceiling Guard)
-   * Không bao giờ để Redis vượt quá tồn kho vật lý trong PostgreSQL
+   * Admin / webhook vận chuyển cập nhật tiến trình đơn:
+   * PENDING → CONFIRMED (chốt hàng) → SHIPPING (xuất kho) → DELIVERED;
+   * hủy trước khi xuất kho → nhả hàng; giao thất bại (SHIPPING → CANCELLED) → chưa đụng kho;
+   * xác nhận đã nhận hàng hoàn → RETURNED (nhập lại kho).
    */
-  private async safeRestoreRedisStock(skuId: string, quantity: number): Promise<void> {
-    try {
-      const stockKey = `stock:${skuId}`;
-      const sku = await this.productPrisma.productSku.findUnique({
-        where: { id: skuId },
-        select: { stockQuantity: true },
-      });
-
-      const maxStock = sku?.stockQuantity ?? 1000;
-      const currentVal = await this.redis.get(stockKey);
-
-      if (currentVal !== null && currentVal !== undefined) {
-        const currentStock = Number(currentVal);
-        const newStock = Math.min(currentStock + quantity, maxStock);
-        await this.redis.set(stockKey, newStock);
-      } else {
-        await this.redis.set(stockKey, maxStock);
-      }
-    } catch (err: unknown) {
-      console.error(`[safeRestoreRedisStock] Lỗi hoàn kho cho SKU ${skuId}:`, err);
-    }
-  }
-
   async updateDeliveryStatus(data: UpdateDeliveryStatusRequest): Promise<UpdateDeliveryStatusResponse> {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.order_id);
-    let order: OrderWithItems | null = null;
-
-    if (isUuid) {
-      order = await this.prisma.order.findUnique({
-        where: { id: data.order_id },
-        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
-      });
-    }
-
+    const order = await this.findOrder(data.order_id);
     if (!order) {
-      order = await this.prisma.order.findUnique({
-        where: { orderCode: data.order_id },
-        include: { items: true, statusHistory: { orderBy: { createdAt: 'asc' } } },
-      });
+      throw rpcError(status.NOT_FOUND, `Không tìm thấy đơn hàng với mã hoặc ID: ${data.order_id}`);
     }
 
-    if (!order) {
-      throw new RpcException({
-        code: status.NOT_FOUND,
-        message: `Không tìm thấy đơn hàng với mã hoặc ID: ${data.order_id}`,
-      });
-    }
-
-    const currentStatus = order.orderStatus;
-    const targetStatus = data.new_status as OrderPrisma.OrderStatus;
-
-    if (currentStatus === OrderPrisma.OrderStatus.CANCELLED) {
-      throw new RpcException({
-        code: status.FAILED_PRECONDITION,
-        message: 'Đơn hàng đã bị hủy, không thể thay đổi tiến trình vận chuyển',
-      });
-    }
-
-    if (currentStatus === OrderPrisma.OrderStatus.DELIVERED && targetStatus !== OrderPrisma.OrderStatus.DELIVERED) {
-      throw new RpcException({
-        code: status.FAILED_PRECONDITION,
-        message: 'Đơn hàng đã giao thành công, không thể chuyển ngược về trạng thái trước',
-      });
-    }
-
-    const updateData: OrderPrisma.Prisma.OrderUpdateInput = {
-      orderStatus: targetStatus,
-    };
-
+    const current = order.orderStatus;
+    const target = data.new_status as OrderStatus;
+    const changedBy = data.changed_by || 'LOGISTICS_SIMULATOR';
+    const updateData: OrderPrisma.Prisma.OrderUpdateManyMutationInput = {};
     let historyNote = data.note;
     let historyLocation = data.location;
+    const stockActions: OrderPrisma.StockSyncAction[] = [];
+    const reject = (message: string) => rpcError(status.FAILED_PRECONDITION, message);
 
-    if (targetStatus === OrderPrisma.OrderStatus.CONFIRMED) {
-      historyNote = historyNote || 'Đơn hàng đã được xác nhận và chuẩn bị đóng gói xuất kho';
-      historyLocation = historyLocation || 'Kho tổng Novatech Logistics';
+    switch (target) {
+      case 'CONFIRMED':
+        if (current === 'PENDING') {
+          stockActions.push('COMMIT');
+        } else if (current !== 'CONFIRMED') {
+          throw reject(`Không thể xác nhận đơn hàng đang ở trạng thái ${current}`);
+        }
+        historyNote = historyNote || 'Đơn hàng đã được xác nhận và chuẩn bị đóng gói xuất kho';
+        historyLocation = historyLocation || 'Kho tổng Novatech Logistics';
+        break;
 
-      // Chuyển reservation sang COMMITTED
-      await this.prisma.inventoryReservation.updateMany({
-        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
-        data: { status: OrderPrisma.ReservationStatus.COMMITTED, expiresAt: null },
-      });
-    } else if (targetStatus === OrderPrisma.OrderStatus.SHIPPING) {
-      updateData.shippedAt = new Date();
-      if (data.carrier_name) {
-        updateData.carrierName = data.carrier_name;
-      } else if (!order.carrierName) {
-        updateData.carrierName = 'Giao Hàng Nhanh (GHN)';
-      }
-      if (data.tracking_code) {
-        updateData.trackingCode = data.tracking_code;
-      } else if (!order.trackingCode) {
-        updateData.trackingCode = `GHN${Date.now().toString().slice(-8)}${Math.floor(1000 + Math.random() * 9000)}`;
-      }
-      historyNote = historyNote || `Đơn hàng đã bàn giao cho shipper của ${updateData.carrierName || order.carrierName}`;
-      historyLocation = historyLocation || 'Kho trung chuyển Tân Bình, TP. Hồ Chí Minh';
-    } else if (targetStatus === OrderPrisma.OrderStatus.DELIVERED) {
-      updateData.deliveredAt = new Date();
-      // Nếu phương thức là COD, shipper giao hàng kiêm thu tiền -> đánh dấu PAID
-      if (order.paymentMethod === OrderPrisma.PaymentMethod.COD && order.paymentStatus !== OrderPrisma.PaymentStatus.PAID) {
-        updateData.paymentStatus = OrderPrisma.PaymentStatus.PAID;
-      }
-      historyNote = historyNote || 'Giao hàng thành công. Khách hàng đã nhận kiện hàng nguyên vẹn';
-      historyLocation = historyLocation || 'Địa chỉ nhận hàng của khách';
-    } else if (targetStatus === OrderPrisma.OrderStatus.CANCELLED) {
-      updateData.cancelReason = data.note || 'Hủy đơn hàng trong quá trình vận chuyển';
-      historyNote = historyNote || 'Đơn hàng đã bị hủy';
-      historyLocation = historyLocation || 'Trung tâm xử lý hoàn hàng';
+      case 'SHIPPING':
+        if (current === 'CONFIRMED' || current === 'PROCESSING') {
+          stockActions.push('SHIP');
+          updateData.shippedAt = new Date();
+          updateData.carrierName = data.carrier_name || order.carrierName || 'Giao Hàng Nhanh (GHN)';
+          updateData.trackingCode =
+            data.tracking_code ||
+            order.trackingCode ||
+            `GHN${Date.now().toString().slice(-8)}${Math.floor(1000 + Math.random() * 9000)}`;
+          historyNote = historyNote || `Đơn hàng đã xuất kho, bàn giao cho shipper của ${updateData.carrierName}`;
+          historyLocation = historyLocation || 'Kho trung chuyển Tân Bình, TP. Hồ Chí Minh';
+        } else if (current === 'SHIPPING') {
+          // Cập nhật vị trí trên đường giao, không đụng kho
+          if (data.carrier_name) updateData.carrierName = data.carrier_name;
+          if (data.tracking_code) updateData.trackingCode = data.tracking_code;
+        } else {
+          throw reject(`Không thể chuyển sang đang giao khi đơn hàng ở trạng thái ${current}`);
+        }
+        break;
 
-      await this.prisma.inventoryReservation.updateMany({
-        where: { orderId: order.id, status: OrderPrisma.ReservationStatus.HOLD },
-        data: { status: OrderPrisma.ReservationStatus.RELEASED },
-      });
-      for (const item of order.items) {
-        await this.safeRestoreRedisStock(item.skuId, item.quantity);
-      }
+      case 'DELIVERED':
+        if (current === 'CONFIRMED' || current === 'PROCESSING') {
+          stockActions.push('SHIP'); // Giao thẳng: xuất kho trước khi ghi nhận giao thành công
+          updateData.shippedAt = new Date();
+        } else if (current !== 'SHIPPING') {
+          throw reject(`Không thể ghi nhận giao thành công khi đơn hàng ở trạng thái ${current}`);
+        }
+        updateData.deliveredAt = new Date();
+        // COD: shipper giao hàng kiêm thu tiền → đánh dấu PAID
+        if (order.paymentMethod === OrderPrisma.PaymentMethod.COD && order.paymentStatus !== OrderPrisma.PaymentStatus.PAID) {
+          updateData.paymentStatus = OrderPrisma.PaymentStatus.PAID;
+        }
+        historyNote = historyNote || 'Giao hàng thành công. Khách hàng đã nhận kiện hàng nguyên vẹn';
+        historyLocation = historyLocation || 'Địa chỉ nhận hàng của khách';
+        break;
+
+      case 'CANCELLED':
+        if (CANCELLABLE_BEFORE_SHIPPING.includes(current)) {
+          stockActions.push('RELEASE');
+          historyNote = historyNote || 'Đơn hàng đã bị hủy';
+        } else if (current === 'SHIPPING') {
+          // Giao thất bại: hàng đang trên đường về, chỉ nhập lại kho khi admin xác nhận đã nhận (RETURNED)
+          historyNote = historyNote || 'Giao hàng thất bại, hàng đang được hoàn về kho';
+        } else {
+          throw reject(`Không thể hủy đơn hàng đang ở trạng thái ${current}`);
+        }
+        updateData.cancelReason = data.note || 'Hủy đơn hàng trong quá trình vận chuyển';
+        historyLocation = historyLocation || 'Trung tâm xử lý hoàn hàng';
+        break;
+
+      case 'RETURNED':
+        if (current === 'DELIVERED' || current === 'SHIPPING' || (current === 'CANCELLED' && order.shippedAt)) {
+          stockActions.push('RETURN');
+        } else {
+          throw reject('Chỉ nhận hàng hoàn cho đơn hàng đã xuất kho');
+        }
+        historyNote = historyNote || 'Kho đã nhận lại hàng hoàn và nhập lại tồn kho';
+        historyLocation = historyLocation || 'Kho tổng Novatech Logistics';
+        break;
+
+      default:
+        throw rpcError(status.INVALID_ARGUMENT, `Trạng thái đơn hàng không hợp lệ: ${data.new_status}`);
     }
 
-    const updatedOrder = await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        ...updateData,
-        statusHistory: {
-          create: {
-            fromStatus: currentStatus,
-            toStatus: targetStatus,
-            note: historyNote,
-            location: historyLocation,
-            changedBy: data.changed_by || 'LOGISTICS_SIMULATOR',
-          },
-        },
-      },
-      include: {
-        items: true,
-        statusHistory: { orderBy: { createdAt: 'asc' } },
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await this.transition(tx, order, target, {
+        data: updateData,
+        note: historyNote,
+        location: historyLocation,
+        changedBy,
+      });
+      for (const action of stockActions) {
+        await this.stockSync.enqueue(tx, order.id, action, changedBy, action === 'RELEASE' ? { reason: historyNote } : undefined);
+      }
     });
+    if (stockActions.length > 0) await this.stockSync.processOrder(order.id);
 
     return {
       success: true,
-      message: `Cập nhật trạng thái đơn hàng sang ${targetStatus} thành công`,
-      order: this.mapOrderToDto(updatedOrder),
+      message: `Cập nhật trạng thái đơn hàng sang ${target} thành công`,
+      order: await this.toDto((await this.findOrder(order.id))!),
     };
   }
 
-  private mapOrderToDto(order: OrderWithItems): OrderDto {
+  // ---------- Nội bộ ----------
+
+  /**
+   * Đổi trạng thái đơn có điều kiện "đang ở trạng thái cũ" (chống hai thao tác đồng thời cùng ghi đè)
+   * và ghi lịch sử, trong transaction của người gọi.
+   */
+  private async transition(
+    tx: Tx,
+    order: { id: string; orderStatus: OrderStatus },
+    target: OrderStatus,
+    opts: {
+      data?: OrderPrisma.Prisma.OrderUpdateManyMutationInput;
+      note?: string;
+      location?: string;
+      changedBy: string;
+    },
+  ): Promise<void> {
+    const res = await tx.order.updateMany({
+      where: { id: order.id, orderStatus: order.orderStatus },
+      data: { ...opts.data, orderStatus: target },
+    });
+    if (res.count === 0) throw concurrentUpdateError();
+
+    await tx.orderStatusHistory.create({
+      data: {
+        orderId: order.id,
+        fromStatus: order.orderStatus,
+        toStatus: target,
+        note: opts.note,
+        location: opts.location,
+        changedBy: opts.changedBy,
+      },
+    });
+  }
+
+  private async findOrder(idOrCode: string): Promise<OrderWithItems | null> {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrCode);
+    if (isUuid) {
+      const byId = await this.prisma.order.findUnique({ where: { id: idOrCode }, include: ORDER_INCLUDE });
+      if (byId) return byId;
+    }
+    return this.prisma.order.findUnique({ where: { orderCode: idOrCode }, include: ORDER_INCLUDE });
+  }
+
+  /** Gọi InventoryService; lỗi được chuyển thành RpcException giữ nguyên mã gRPC để Gateway trả đúng HTTP */
+  private async callInventory<T>(source: Observable<T>): Promise<T> {
+    try {
+      return await firstValueFrom(source.pipe(timeout(RPC_TIMEOUT_MS)));
+    } catch (err: unknown) {
+      const code = grpcCodeOf(err);
+      if (code === undefined || code === status.UNAVAILABLE || code === status.DEADLINE_EXCEEDED) {
+        this.logger.error(`InventoryService không phản hồi: ${errorMessageOf(err)}`);
+        throw rpcError(status.UNAVAILABLE, 'Hệ thống kho tạm thời không phản hồi, vui lòng thử lại sau ít phút');
+      }
+      throw rpcError(code, errorMessageOf(err));
+    }
+  }
+
+  private mergeItems(items: StockItem[]): StockItem[] {
+    const merged = new Map<string, number>();
+    for (const item of items) merged.set(item.sku_id, (merged.get(item.sku_id) ?? 0) + item.quantity);
+    return [...merged.entries()].map(([sku_id, quantity]) => ({ sku_id, quantity }));
+  }
+
+  private async toDto(order: OrderWithItems): Promise<OrderDto> {
+    const state = (await this.stockSync.getSyncStates([order.id])).get(order.id);
+    return this.mapOrderToDto(order, state);
+  }
+
+  private mapOrderToDto(order: OrderWithItems, syncState?: StockSyncState): OrderDto {
     return {
       id: order.id,
       order_code: order.orderCode,
@@ -748,6 +630,8 @@ export class OrderService implements OnModuleDestroy {
         changed_by: h.changedBy,
         created_at: h.createdAt.toISOString(),
       })),
+      stock_sync_status: syncState?.status ?? 'OK',
+      stock_sync_error: syncState?.error,
     };
   }
 }

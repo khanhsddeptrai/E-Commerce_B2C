@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsEmail,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -67,7 +68,7 @@ export class CancelOrderDto {
 
 export class UpdateDeliveryStatusDto {
   @IsString()
-  @IsNotEmpty()
+  @IsIn(['CONFIRMED', 'SHIPPING', 'DELIVERED', 'CANCELLED', 'RETURNED'])
   new_status!: string;
 
   @IsString()

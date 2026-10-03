@@ -10,7 +10,8 @@
 - Package manager: `pnpm` (workspace) + Turborepo.
 - **Kiểm tra sau khi sửa code:** `pnpm turbo run typecheck` (toàn repo) hoặc `pnpm --filter <app> typecheck`.
 - **Test (Jest):** `pnpm turbo run test` hoặc `pnpm --filter <product-service|order-service> test`. Cần Docker đang chạy (Postgres + Redis).
-  - Test đặt ở `apps/<service>/test/**/*.spec.ts`; dùng database `<tên>_test` (tạo mới mỗi lần chạy + `prisma migrate deploy`) và Redis DB riêng (product-service: 15, order-service: 14). Helper có guard từ chối chạy trên DB không có hậu tố `_test`.
+  - Test đặt ở `apps/<service>/test/**/*.spec.ts`; dùng database test tạo mới mỗi lần chạy + `prisma migrate deploy` (product-service: `product_db_test` + `order_db_test` cho test backfill, Redis DB 15; order-service: `order_db_ordersvc_test`, dùng `FakeInventoryClient` thay cho gRPC thật). Helper có guard từ chối chạy trên DB không có hậu tố `_test`.
+  - Test có tranh chấp đồng thời: kiểm chứng bằng cách tạm bỏ điều kiện chống trùng và xác nhận test fail (backup file vào scratchpad, không dùng `rm` với đường dẫn tương đối).
   - Lỗi đã biết nhưng chưa sửa được ghi bằng `test.failing` — khi sửa xong, đổi thành `it` thường.
   - Bắt buộc chạy test khi sửa bất kỳ logic tồn kho / đơn hàng nào.
 - Chạy nhiều service cùng lúc: `pnpm turbo run dev --filter=api-gateway --filter=product-service` (không nối 2 lệnh `pnpm` trên một dòng).
@@ -27,6 +28,7 @@
 - File `.proto` + interface TypeScript viết tay ở `packages/proto/src/` (`index.ts`). Khi thêm RPC phải sửa cả `.proto` lẫn interface trong `index.ts`.
 - Loader dùng `keepCase: true` → field giữ nguyên `snake_case` (vd `full_name`) ở mọi tầng gRPC.
 - Lỗi gRPC được map sang HTTP qua `apps/api-gateway/src/common/filters/grpc-exception.filter.ts`.
+- **Tồn kho chỉ do product-service quản lý** (`InventoryService`, package `inventory`, cùng cổng :50052). Order-service không kết nối `product_db` / Redis; mọi thao tác kho sau khi tạo đơn đi qua bảng `stock_sync_tasks` + `StockSyncService` (xem `docs/06-wms-implementation-plan.md`).
 
 ## Database (Prisma)
 - Mỗi database một thư mục riêng: `packages/database/prisma/{auth,product,order,payment}/schema.prisma`, mỗi thư mục có `migrations/` riêng (bắt đầu từ baseline `0_init`). **Không bao giờ để nhiều schema dùng chung một thư mục migrations** — migration của schema này sẽ sinh `DROP TABLE` bảng của schema khác.

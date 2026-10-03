@@ -40,12 +40,12 @@ export interface StockSyncState {
   error?: string;
 }
 
-function grpcCodeOf(err: unknown): number | undefined {
+export function grpcCodeOf(err: unknown): number | undefined {
   if (typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'number') return err.code;
   return undefined;
 }
 
-function errorMessageOf(err: unknown): string {
+export function errorMessageOf(err: unknown): string {
   if (typeof err === 'object' && err !== null && 'details' in err && typeof err.details === 'string' && err.details) {
     return err.details;
   }

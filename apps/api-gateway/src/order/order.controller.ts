@@ -197,6 +197,22 @@ export class OrderController implements OnModuleInit {
     return res;
   }
 
+  /** Admin thử lại các thao tác kho đã thất bại của đơn (vd đã thanh toán nhưng hết hàng, kho không phản hồi) */
+  @Post(':id/retry-stock-sync')
+  @UseGuards(JwtAuthGuard)
+  async retryStockSync(@Req() req: RequestWithUser, @Param('id') id: string) {
+    if (req.user.role !== 'ADMIN') {
+      throw new ForbiddenException('Chỉ có quản trị viên (ADMIN) mới có quyền thử lại đồng bộ kho');
+    }
+    const res = await firstValueFrom(this.orderServiceClient.retryStockSync({ order_id: id }));
+    return {
+      success: res.success ?? false,
+      message: res.message,
+      stock_sync_status: res.stock_sync_status,
+      stock_sync_error: res.stock_sync_error,
+    };
+  }
+
   @Post('webhook/carrier')
   async handleCarrierWebhook(@Body() dto: CarrierWebhookDto) {
     const statusMap: Record<string, string> = {

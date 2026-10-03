@@ -48,6 +48,17 @@ export class GrpcToHttpExceptionFilter implements ExceptionFilter {
       case 16: // UNAUTHENTICATED
         status = HttpStatus.UNAUTHORIZED;
         break;
+      case 8: // RESOURCE_EXHAUSTED (vd hết hàng)
+      case 9: // FAILED_PRECONDITION (vd sai trạng thái đơn)
+      case 10: // ABORTED (vd đơn vừa bị thao tác khác cập nhật)
+        status = HttpStatus.CONFLICT;
+        break;
+      case 4: // DEADLINE_EXCEEDED
+        status = HttpStatus.GATEWAY_TIMEOUT;
+        break;
+      case 14: // UNAVAILABLE (service phía sau không phản hồi)
+        status = HttpStatus.SERVICE_UNAVAILABLE;
+        break;
       default:
         status = HttpStatus.INTERNAL_SERVER_ERROR;
         break;

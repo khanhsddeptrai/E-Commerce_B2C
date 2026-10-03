@@ -1,27 +1,13 @@
-import Redis from 'ioredis';
 import { Observable, defer, of, throwError } from 'rxjs';
 import { status } from '@grpc/grpc-js';
 import { OrderPrisma } from '@repo/database';
 import {
   InventoryServiceClient,
+  OrderSkuDto,
   StockOperationResponse,
 } from '@repo/proto';
 import { PrismaOrderService } from '../src/prisma/prisma-order.service';
-import { assertTestDatabaseName, TEST_REDIS_DB } from './test-env';
-
-export { TEST_REDIS_DB };
-
-export function createTestRedis(): Redis {
-  return new Redis(process.env.REDIS_URL as string);
-}
-
-/** Xóa Redis DB dành riêng cho test — từ chối nếu không đúng DB test */
-export async function flushTestRedis(redis: Redis): Promise<void> {
-  if (redis.options.db !== TEST_REDIS_DB) {
-    throw new Error(`Từ chối FLUSHDB trên Redis DB ${redis.options.db}: chỉ được dùng DB ${TEST_REDIS_DB} cho test`);
-  }
-  await redis.flushdb();
-}
+import { assertTestDatabaseName } from './test-env';
 
 /** Xóa sạch dữ liệu mọi bảng (giữ lịch sử migrations) — chỉ chạy trên database _test */
 export async function resetOrderDb(prisma: PrismaOrderService): Promise<void> {
@@ -81,8 +67,11 @@ export class FakeInventoryClient implements InventoryServiceClient {
     });
   }
 
+  /** SKU mà getSkusForOrder trả về (lọc theo sku_ids được hỏi) */
+  skus: OrderSkuDto[] = [];
+
   getSkusForOrder = (r: Parameters<InventoryServiceClient['getSkusForOrder']>[0]) =>
-    this.respond('getSkusForOrder', r, { skus: [] });
+    this.respond('getSkusForOrder', r, { skus: this.skus.filter((s) => r.sku_ids.includes(s.id)) });
   holdStock = (r: Parameters<InventoryServiceClient['holdStock']>[0]) => this.respond('holdStock', r, OK);
   commitStock = (r: Parameters<InventoryServiceClient['commitStock']>[0]) => this.respond('commitStock', r, OK);
   releaseStock = (r: Parameters<InventoryServiceClient['releaseStock']>[0]) => this.respond('releaseStock', r, OK);
@@ -139,4 +128,19 @@ export async function createOrder(
     },
     include: { items: true },
   });
+}
+
+export function skuFixture(id: string, overrides: Partial<OrderSkuDto> = {}): OrderSkuDto {
+  return {
+    id,
+    sku_code: `SKU-${id.slice(-4)}`,
+    sku_name: 'Đen',
+    product_id: '00000000-0000-4000-8000-000000000002',
+    product_name: 'Bàn phím Aula F75',
+    product_status: 'PUBLISHED',
+    price: 200000,
+    is_active: true,
+    thumbnail_url: 'https://example.test/sku.png',
+    ...overrides,
+  };
 }

@@ -1,156 +1,94 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import Redis from 'ioredis';
-import { OrderPrisma, ProductPrismaClient } from '@repo/database';
+import { OrderPrisma } from '@repo/database';
 import { PrismaOrderService } from '../prisma/prisma-order.service';
+import { StockSyncService } from '../stock-sync/stock-sync.service';
+import { PAYMENT_WINDOW_SECONDS } from './order.service';
 
+const INTERVAL_MS = 30_000;
+const CANCEL_REASON = 'Quá hạn thanh toán 15 phút';
+
+/**
+ * Hủy các đơn thanh toán trực tuyến quá hạn (PENDING quá 15 phút) và nhả hàng qua task RELEASE.
+ * Product Service cũng tự nhả lượt giữ hàng quá hạn; task RELEASE idempotent nên không bị nhả hai lần.
+ */
 @Injectable()
 export class ExpiredOrderWorker implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(ExpiredOrderWorker.name);
   private timer: NodeJS.Timeout | null = null;
   private isProcessing = false;
-  private readonly redis: Redis;
-  private readonly productPrisma: ProductPrismaClient;
 
-  constructor(private readonly prisma: PrismaOrderService) {
-    const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
-    this.redis = new Redis(redisUrl, {
-      maxRetriesPerRequest: 3,
-    });
-
-    this.productPrisma = new ProductPrismaClient({
-      datasources: {
-        db: {
-          url:
-            process.env.PRODUCT_DATABASE_URL ||
-            'postgresql://postgres:postgrespassword@localhost:5432/product_db?schema=public',
-        },
-      },
-    });
-  }
+  constructor(
+    private readonly prisma: PrismaOrderService,
+    private readonly stockSync: StockSyncService,
+  ) {}
 
   onModuleInit(): void {
     this.logger.log('Khởi động ExpiredOrderWorker (chu kỳ quét: 30s)...');
-    // Khởi chạy quét định kỳ mỗi 30 giây
     this.timer = setInterval(() => {
-      void this.processExpiredReservations();
-    }, 30000);
+      void this.processExpiredOrders();
+    }, INTERVAL_MS);
   }
 
-  async onModuleDestroy(): Promise<void> {
+  onModuleDestroy(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.redis.disconnect();
-    await this.productPrisma.$disconnect();
   }
 
-  /**
-   * Quét và hủy các đơn hàng quá hạn thanh toán 15 phút (HOLD -> RELEASED)
-   * và nhả lại số lượng tồn kho trên Redis
-   */
-  async processExpiredReservations(): Promise<number> {
+  async processExpiredOrders(now: Date = new Date(), batchSize = 100): Promise<number> {
     if (this.isProcessing) return 0;
     this.isProcessing = true;
 
     try {
-      const now = new Date();
-      // Tìm các bản ghi giữ kho hết hạn (HOLD và expiresAt <= NOW)
-      const expiredList = await this.prisma.inventoryReservation.findMany({
+      const deadline = new Date(now.getTime() - PAYMENT_WINDOW_SECONDS * 1000);
+      const expired = await this.prisma.order.findMany({
         where: {
-          status: OrderPrisma.ReservationStatus.HOLD,
-          expiresAt: {
-            lte: now,
-          },
+          orderStatus: OrderPrisma.OrderStatus.PENDING,
+          paymentStatus: { not: OrderPrisma.PaymentStatus.PAID },
+          paymentMethod: { not: OrderPrisma.PaymentMethod.COD },
+          createdAt: { lte: deadline },
         },
-        include: {
-          order: true,
-        },
-        take: 100, // Giới hạn batch xử lý
+        select: { id: true, orderCode: true },
+        orderBy: { createdAt: 'asc' },
+        take: batchSize,
       });
 
-      if (expiredList.length === 0) {
-        return 0;
-      }
-
-      this.logger.warn(`Phát hiện ${expiredList.length} bản ghi giữ kho quá hạn cần giải phóng.`);
-
-      const orderIdsToCancel = new Set<string>();
-
-      for (const res of expiredList) {
-        // 1. Cập nhật reservation sang RELEASED chỉ khi đang ở HOLD
-        const releaseResult = await this.prisma.inventoryReservation.updateMany({
-          where: { id: res.id, status: OrderPrisma.ReservationStatus.HOLD },
-          data: { status: OrderPrisma.ReservationStatus.RELEASED },
-        });
-
-        // 2. Chỉ hoàn lại tồn kho trên Redis nếu bản ghi thực sự vừa được giải phóng
-        if (releaseResult.count > 0) {
-          await this.safeRestoreRedisStock(res.skuId, res.quantity);
-          this.logger.log(`Đã hoàn kho Redis: stock:${res.skuId} +${res.quantity}`);
-        }
-
-        // 3. Gom các orderId cần hủy
-        if (res.orderId && res.order?.orderStatus === OrderPrisma.OrderStatus.PENDING) {
-          orderIdsToCancel.add(res.orderId);
-        }
-      }
-
-      // 4. Hủy các đơn hàng liên quan nếu vẫn ở trạng thái PENDING
-      for (const orderId of orderIdsToCancel) {
-        await this.prisma.$transaction(async (tx) => {
-          await tx.order.update({
-            where: { id: orderId },
-            data: {
-              orderStatus: OrderPrisma.OrderStatus.CANCELLED,
-              cancelReason: 'Quá hạn thanh toán 15 phút',
-            },
+      let cancelled = 0;
+      for (const order of expired) {
+        const done = await this.prisma.$transaction(async (tx) => {
+          // Chỉ hủy nếu vẫn đang chờ thanh toán (có thể vừa được thanh toán trong lúc quét)
+          const res = await tx.order.updateMany({
+            where: { id: order.id, orderStatus: OrderPrisma.OrderStatus.PENDING },
+            data: { orderStatus: OrderPrisma.OrderStatus.CANCELLED, cancelReason: CANCEL_REASON },
           });
-
+          if (res.count === 0) return false;
           await tx.orderStatusHistory.create({
             data: {
-              orderId,
+              orderId: order.id,
               fromStatus: OrderPrisma.OrderStatus.PENDING,
               toStatus: OrderPrisma.OrderStatus.CANCELLED,
               note: 'Đơn hàng quá hạn thanh toán 15 phút, hệ thống tự động hủy và hoàn lại tồn kho',
               changedBy: 'SYSTEM_WORKER',
             },
           });
+          await this.stockSync.enqueue(tx, order.id, 'RELEASE', 'SYSTEM_WORKER', { reason: CANCEL_REASON });
+          return true;
         });
 
-        this.logger.log(`Đã tự động hủy đơn hàng ID: ${orderId}`);
+        if (done) {
+          cancelled += 1;
+          await this.stockSync.processOrder(order.id);
+          this.logger.log(`Đã tự động hủy đơn hàng quá hạn: ${order.orderCode}`);
+        }
       }
-
-      return expiredList.length;
+      return cancelled;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Lỗi trong ExpiredOrderWorker: ${message}`);
       return 0;
     } finally {
       this.isProcessing = false;
-    }
-  }
-
-  private async safeRestoreRedisStock(skuId: string, quantity: number): Promise<void> {
-    try {
-      const stockKey = `stock:${skuId}`;
-      const sku = await this.productPrisma.productSku.findUnique({
-        where: { id: skuId },
-        select: { stockQuantity: true },
-      });
-
-      const maxStock = sku?.stockQuantity ?? 1000;
-      const currentVal = await this.redis.get(stockKey);
-
-      if (currentVal !== null && currentVal !== undefined) {
-        const currentStock = Number(currentVal);
-        const newStock = Math.min(currentStock + quantity, maxStock);
-        await this.redis.set(stockKey, newStock);
-      } else {
-        await this.redis.set(stockKey, maxStock);
-      }
-    } catch (err: unknown) {
-      this.logger.error(`Lỗi hoàn kho cho SKU ${skuId}:`, err);
     }
   }
 }

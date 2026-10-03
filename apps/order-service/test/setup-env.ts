@@ -1,7 +1,5 @@
-import { getTestOrderDatabaseUrl, getTestRedisUrl } from './test-env';
+import { getTestOrderDatabaseUrl } from './test-env';
 
-const orderDatabaseUrl = getTestOrderDatabaseUrl();
-const redisUrl = getTestRedisUrl();
-
-process.env.ORDER_DATABASE_URL = orderDatabaseUrl;
-process.env.REDIS_URL = redisUrl;
+process.env.ORDER_DATABASE_URL = getTestOrderDatabaseUrl();
+// Order Service không kết nối product_db hay Redis nữa (mọi thao tác kho qua InventoryService)
+process.env.PRODUCT_GRPC_URL = 'localhost:59999';
