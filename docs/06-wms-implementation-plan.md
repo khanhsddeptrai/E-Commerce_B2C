@@ -104,7 +104,7 @@ Idempotency chỉ đảm bảo *gọi lại thì an toàn*; cần thêm cơ ch�
 
 Mỗi bước: typecheck + test pass → gửi commit message → người dùng commit → bước tiếp theo.
 
-### Bước 0 — Thiết lập Jest & test đặc tả hành vi hiện tại
+### Bước 0 — Thiết lập Jest & test đặc tả hành vi hiện tại ✅ *(hoàn thành 2026-10-02)*
 - Cài `jest`, `ts-jest`, `@types/jest` cho `product-service` và `order-service`; thêm script `test` và task `test` trong `turbo.json`.
 - Test tích hợp chạy với Postgres/Redis từ Docker: dùng database `product_db_test` riêng và Redis DB số 15 để không đụng dữ liệu dev.
 - Test Lua giữ kho hiện tại: đủ hàng, thiếu hàng, 2 yêu cầu đồng thời tranh SKU cuối cùng.
@@ -128,7 +128,7 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
   - *Không sửa file seed: seed vẫn ghi `stock_quantity`, sau đó chạy backfill để khởi tạo tồn cho SKU mới. Seed sẽ chuyển hẳn sang `inventory_stocks` khi xóa cột `stock_quantity` ở Bước 5.*
   - ***Chưa chạy backfill trên dữ liệu dev** — chỉ chạy lúc chuyển đổi, sau khi Bước 2 + 3 hoàn tất và các service đã dừng (nếu chạy sớm, đơn hàng mới phát sinh theo luồng cũ sẽ làm số liệu lệch).*
 
-### Bước 2 — Module `inventory` trong Product Service
+### Bước 2 — Module `inventory` trong Product Service ✅ *(hoàn thành 2026-10-03)*
 - Viết RPC ở mục 5 (proto + interface `packages/proto` + controller + service), worker hết hạn, `ReconcileStock`.
 - Test Jest cho từng RPC: idempotency (gọi 2 lần), đồng thời, các chuyển trạng thái trong bảng mục 3.
 - Đọc tồn trong `getProducts`/`getAdminProducts`/stats chuyển sang `inventory_stocks` + Redis.
@@ -138,7 +138,8 @@ Mỗi bước: typecheck + test pass → gửi commit message → người dùng
   - **2b ✅** *(2026-10-03)* — `CreateReceipt` (mã `GRN-YYMMDD-XXXX`), `AdjustStock` (mã `ADJ-…`, giảm chỉ trong phần còn bán được – kiểm tra nguyên tử trên Redis), `ReceiveReturn` (nhận toàn bộ hoặc một phần); 22 test.
     - *Giai đoạn chuyển đổi: `createProduct` / `updateSkuStock` có 2 chế độ theo việc đã có kho mặc định hay chưa (chưa chạy backfill → giữ hành vi cũ). Khi đã bật WMS: `createProduct` ghi tồn đầu kỳ, `updateSkuStock` ghi phiếu điều chỉnh phần chênh lệch (sửa lỗi #1) và vẫn đồng bộ cột `stock_quantity` cho tới 2c.*
     - *`updateProduct` vốn không sửa SKU / tồn nên không cần đổi.*
-  - **2c** — API đọc tồn / sổ kho có phân trang, worker nhả giữ hàng hết hạn, `ReconcileStock`; catalog đọc tồn từ `inventory_stocks`.
+  - **2c ✅** *(2026-10-03)* — `GetInventoryStocks` (on_hand / reserved / held / available, lọc hàng sắp hết, SQL thuần vì lọc theo cột tính toán), `GetInventoryTransactions`, `GetReceipts` (đều phân trang `items/total/page/limit`); `ReconcileStock`; `StockMaintenanceWorker` (đối soát Redis lúc khởi động trước khi nhận request + nhả HOLD quá hạn mỗi 30 giây, chỉ khi đã bật WMS); catalog đọc số còn bán được qua `InventoryService.getAvailableStocks`; test khởi tạo `AppModule` bắt lỗi DI. Tổng 12 RPC kho, 93 test product-service.
+    - *Còn lại cho Bước 5: bỏ đồng bộ cột `stock_quantity` trong `updateSkuStock` và các nhánh luồng cũ khi xóa cột.*
 
 ### Bước 3 — Refactor Order Service
 - Bỏ `ProductPrismaClient`, `RESERVE_STOCK_LUA`, `safeRestoreRedisStock`, `ExpiredOrderWorker` phần kho; gọi RPC mới qua gRPC client.

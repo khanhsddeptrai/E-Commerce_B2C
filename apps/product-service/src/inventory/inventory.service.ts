@@ -14,23 +14,24 @@ import {
   InventoryStockDto,
   ReceiptDto,
   ReceiveReturnRequest,
+  ReconcileStockRequest,
+  ReconcileStockResponse,
   ReleaseStockRequest,
   ReservationDto,
   ShipStockRequest,
+  StockDriftDto,
   StockItem,
   StockOperationResponse,
 } from '@repo/proto';
 import { PrismaProductService } from '../prisma/prisma-product.service';
 import { RESERVE_MULTI_LUA, RESTORE_MULTI_LUA, stockKey } from './stock-scripts';
+import { mapReceipt, mapStock, RECEIPT_INCLUDE } from './inventory.mappers';
 
 const DEFAULT_HOLD_TTL_SECONDS = 15 * 60;
 const MAX_CODE_ATTEMPTS = 5;
 
 type Reservation = ProductPrisma.InventoryReservation;
 type TransactionClient = ProductPrisma.Prisma.TransactionClient;
-type ReceiptWithItems = ProductPrisma.Prisma.InventoryReceiptGetPayload<{
-  include: { warehouse: true; items: { include: { sku: { include: { product: true } } } } };
-}>;
 
 interface NormalizedItem {
   skuId: string;
@@ -485,9 +486,9 @@ export class InventoryService implements OnModuleDestroy {
 
     const full = await this.prisma.inventoryReceipt.findUniqueOrThrow({
       where: { id: receipt.id },
-      include: { warehouse: true, items: { include: { sku: { include: { product: true } } } } },
+      include: RECEIPT_INCLUDE,
     });
-    return this.mapReceipt(full);
+    return mapReceipt(full);
   }
 
   /**
@@ -524,7 +525,7 @@ export class InventoryService implements OnModuleDestroy {
         ),
       }));
       await this.restoreInRedis([item]);
-      return { stock: this.mapStock(stock), adjustment_code: code };
+      return { stock: mapStock(stock), adjustment_code: code };
     }
 
     // Giảm: giữ trước phần cần giảm trên Redis (nguyên tử) để không lấn vào hàng đang giữ / đã chốt
@@ -569,7 +570,7 @@ export class InventoryService implements OnModuleDestroy {
           return updated;
         }),
       }));
-      return { stock: this.mapStock(stock), adjustment_code: code };
+      return { stock: mapStock(stock), adjustment_code: code };
     } catch (err: unknown) {
       // Hoàn lại phần đã trừ trên Redis vì database không thay đổi
       await this.restoreInRedis([item]);
@@ -629,9 +630,97 @@ export class InventoryService implements OnModuleDestroy {
     if (!current) return null;
 
     const delta = target - current.onHand;
-    if (delta === 0) return this.mapStock(current);
+    if (delta === 0) return mapStock(current);
     const res = await this.adjustStock({ sku_id: skuId, warehouse_id: warehouseId, quantity_delta: delta, reason, created_by: createdBy });
     return res.stock;
+  }
+
+  /**
+   * Số lượng còn bán được của các SKU (đọc Redis, khởi tạo key thiếu từ database).
+   * Trả null nếu WMS chưa được bật — Catalog dùng cách đọc cũ.
+   */
+  async getAvailableStocks(skuIds: string[]): Promise<Map<string, number> | null> {
+    if (!(await this.findDefaultWarehouseId())) return null;
+    const ids = [...new Set(skuIds)];
+    const result = new Map<string, number>();
+    if (ids.length === 0) return result;
+
+    await this.ensureStockKeys(ids);
+    const values = await this.redis.mget(...ids.map(stockKey));
+    ids.forEach((id, idx) => result.set(id, Math.max(0, Number(values[idx] ?? 0))));
+    return result;
+  }
+
+  // ---------- Bảo trì ----------
+
+  /**
+   * Nhả các lượt giữ hàng HOLD đã quá hạn: HOLD → RELEASED, cộng trả Redis.
+   * Chỉ đụng vào dòng vẫn còn HOLD và đã quá hạn tại thời điểm cập nhật — không ảnh hưởng đơn vừa được chốt.
+   */
+  async releaseExpiredHolds(now: Date = new Date(), batchSize = 200): Promise<number> {
+    const expired = await this.prisma.inventoryReservation.findMany({
+      where: { status: 'HOLD', expiresAt: { lte: now } },
+      orderBy: { expiresAt: 'asc' },
+      take: batchSize,
+    });
+    if (expired.length === 0) return 0;
+
+    const released: Reservation[] = [];
+    for (const r of expired) {
+      const res = await this.prisma.inventoryReservation.updateMany({
+        where: { id: r.id, status: 'HOLD', expiresAt: { lte: now } },
+        data: { status: 'RELEASED', expiresAt: null },
+      });
+      if (res.count > 0) released.push(r);
+    }
+
+    await this.restoreInRedis(this.mergeItems(released));
+    if (released.length > 0) {
+      this.logger.log(`Đã nhả ${released.length} lượt giữ hàng quá hạn`);
+    }
+    return released.length;
+  }
+
+  /**
+   * Dựng lại Redis stock:{skuId} từ database cho các SKU (rỗng = mọi SKU có tồn), trả về các SKU bị lệch.
+   * Ghi đè trực tiếp nên chỉ chạy khi ít giao dịch (lúc khởi động service, hoặc admin chủ động).
+   */
+  async reconcileStock(data: ReconcileStockRequest): Promise<ReconcileStockResponse> {
+    const ids =
+      data.sku_ids && data.sku_ids.length > 0
+        ? [...new Set(data.sku_ids)]
+        : (await this.prisma.inventoryStock.findMany({ select: { skuId: true }, distinct: ['skuId'] })).map(
+            (s) => s.skuId,
+          );
+
+    const drifts: StockDriftDto[] = [];
+    const CHUNK = 500;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      const [available, before] = await Promise.all([
+        this.computeAvailableFromDb(chunk),
+        this.redis.mget(...chunk.map(stockKey)),
+      ]);
+      const pipeline = this.redis.pipeline();
+      chunk.forEach((skuId, idx) => {
+        const expected = Math.max(0, available.get(skuId) ?? 0);
+        const current = before[idx];
+        if (current === null || current === undefined || Number(current) !== expected) {
+          drifts.push({
+            sku_id: skuId,
+            redis_before: current === null || current === undefined ? undefined : Number(current),
+            expected,
+          });
+          pipeline.set(stockKey(skuId), expected);
+        }
+      });
+      await pipeline.exec();
+    }
+
+    if (drifts.length > 0) {
+      this.logger.warn(`ReconcileStock: đã sửa ${drifts.length}/${ids.length} SKU bị lệch tồn trên Redis`);
+    }
+    return { checked: ids.length, drifts };
   }
 
   // ---------- Redis ----------
@@ -773,39 +862,6 @@ export class InventoryService implements OnModuleDestroy {
         }
       }
     }
-  }
-
-  private mapStock(stock: ProductPrisma.InventoryStock): InventoryStockDto {
-    return {
-      sku_id: stock.skuId,
-      warehouse_id: stock.warehouseId,
-      on_hand: stock.onHand,
-      reserved: stock.reserved,
-    };
-  }
-
-  private mapReceipt(receipt: ReceiptWithItems): ReceiptDto {
-    const items = receipt.items.map((i) => ({
-      sku_id: i.skuId,
-      sku_code: i.sku.skuCode,
-      sku_name: i.sku.name,
-      product_name: i.sku.product.name,
-      quantity: i.quantity,
-      cost_price: Number(i.costPrice),
-    }));
-    return {
-      id: receipt.id,
-      code: receipt.code,
-      warehouse_id: receipt.warehouseId,
-      warehouse_code: receipt.warehouse.code,
-      supplier_name: receipt.supplierName ?? '',
-      note: receipt.note ?? '',
-      created_by: receipt.createdBy,
-      created_at: receipt.createdAt.toISOString(),
-      items,
-      total_quantity: items.reduce((sum, i) => sum + i.quantity, 0),
-      total_cost: items.reduce((sum, i) => sum + i.quantity * i.cost_price, 0),
-    };
   }
 
   private findReservations(orderId: string): Promise<Reservation[]> {

@@ -590,6 +590,11 @@ export class CatalogService implements OnModuleDestroy {
     if (!skus || skus.length === 0) return stockMap;
 
     try {
+      // Đã bật WMS: số còn bán được lấy từ InventoryService (key thiếu được khởi tạo từ inventory_stocks)
+      const wmsStocks = await this.inventory.getAvailableStocks(skus.map((s) => s.id));
+      if (wmsStocks) return wmsStocks;
+
+      // Chưa bật WMS (luồng cũ): key thiếu được khởi tạo từ product_skus.stock_quantity
       const keys = skus.map((s) => `stock:${s.id}`);
       const results = await this.redis.mget(...keys);
 

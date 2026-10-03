@@ -13,6 +13,10 @@ service InventoryService {
   rpc ReceiveReturn (ReceiveReturnRequest) returns (StockOperationResponse);
   rpc CreateReceipt (CreateReceiptRequest) returns (ReceiptDto);
   rpc AdjustStock (AdjustStockRequest) returns (AdjustStockResponse);
+  rpc GetInventoryStocks (GetInventoryStocksRequest) returns (GetInventoryStocksResponse);
+  rpc GetInventoryTransactions (GetInventoryTransactionsRequest) returns (GetInventoryTransactionsResponse);
+  rpc GetReceipts (GetReceiptsRequest) returns (GetReceiptsResponse);
+  rpc ReconcileStock (ReconcileStockRequest) returns (ReconcileStockResponse);
 }
 
 message StockItem {
@@ -148,4 +152,100 @@ message StockOperationResponse {
   string message = 2;
   repeated ReservationDto reservations = 3;
   bool already_processed = 4; // true nếu thao tác đã được thực hiện trước đó (gọi lại)
+}
+
+// ---------- Truy vấn (có phân trang: items / total / page / limit) ----------
+
+message GetInventoryStocksRequest {
+  optional int32 page = 1;
+  optional int32 limit = 2;
+  optional string search = 3; // Tên sản phẩm / tên biến thể / mã SKU
+  optional string warehouse_id = 4;
+  optional bool low_stock_only = 5; // Chỉ SKU có số còn bán được ≤ low_stock_threshold
+  optional int32 low_stock_threshold = 6; // Mặc định 5
+}
+
+message InventoryStockItemDto {
+  string sku_id = 1;
+  string sku_code = 2;
+  string sku_name = 3;
+  string product_id = 4;
+  string product_name = 5;
+  string warehouse_id = 6;
+  string warehouse_code = 7;
+  int32 on_hand = 8;   // Tồn thực tế
+  int32 reserved = 9;  // Đã chốt, chưa xuất kho
+  int32 held = 10;     // Đang giữ chờ thanh toán
+  int32 available = 11; // Còn bán được = on_hand − reserved − held
+}
+
+message GetInventoryStocksResponse {
+  repeated InventoryStockItemDto items = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message GetInventoryTransactionsRequest {
+  optional int32 page = 1;
+  optional int32 limit = 2;
+  optional string sku_id = 3;
+  optional string type = 4; // INBOUND | OUTBOUND | RETURN | ADJUSTMENT
+  optional string ref_id = 5; // Mã phiếu nhập / mã đơn / mã điều chỉnh
+  optional string from = 6; // ISO 8601
+  optional string to = 7;   // ISO 8601
+}
+
+message InventoryTransactionDto {
+  string id = 1;
+  string sku_id = 2;
+  string sku_code = 3;
+  string sku_name = 4;
+  string product_name = 5;
+  string warehouse_code = 6;
+  string type = 7;
+  int32 quantity = 8;
+  int32 balance_after = 9;
+  string ref_type = 10;
+  string ref_id = 11;
+  string note = 12;
+  string created_by = 13;
+  string created_at = 14;
+}
+
+message GetInventoryTransactionsResponse {
+  repeated InventoryTransactionDto items = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+message GetReceiptsRequest {
+  optional int32 page = 1;
+  optional int32 limit = 2;
+  optional string search = 3; // Mã phiếu / nhà cung cấp
+}
+
+message GetReceiptsResponse {
+  repeated ReceiptDto items = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 limit = 4;
+}
+
+// Dựng lại Redis stock:{skuId} từ database (on_hand − reserved − HOLD chưa nhả).
+// Nên chạy khi ít giao dịch: giá trị ghi đè có thể lệch nếu đúng lúc đó có lượt giữ hàng đang xử lý
+message ReconcileStockRequest {
+  repeated string sku_ids = 1; // Rỗng = toàn bộ SKU có tồn
+}
+
+message StockDriftDto {
+  string sku_id = 1;
+  optional int32 redis_before = 2; // Không có = key chưa tồn tại
+  int32 expected = 3;
+}
+
+message ReconcileStockResponse {
+  int32 checked = 1;
+  repeated StockDriftDto drifts = 2; // Các SKU bị lệch đã được sửa
 }

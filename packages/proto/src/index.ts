@@ -432,6 +432,100 @@ export interface AdjustStockResponse {
   adjustment_code: string;
 }
 
+export interface GetInventoryStocksRequest {
+  page?: number;
+  limit?: number;
+  search?: string;
+  warehouse_id?: string;
+  low_stock_only?: boolean;
+  low_stock_threshold?: number;
+}
+
+export interface InventoryStockItemDto {
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  product_id: string;
+  product_name: string;
+  warehouse_id: string;
+  warehouse_code: string;
+  on_hand: number;
+  reserved: number;
+  held: number;
+  available: number;
+}
+
+export interface GetInventoryStocksResponse {
+  items: InventoryStockItemDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export type InventoryTransactionTypeValue = 'INBOUND' | 'OUTBOUND' | 'RETURN' | 'ADJUSTMENT';
+
+export interface GetInventoryTransactionsRequest {
+  page?: number;
+  limit?: number;
+  sku_id?: string;
+  type?: string;
+  ref_id?: string;
+  from?: string;
+  to?: string;
+}
+
+export interface InventoryTransactionDto {
+  id: string;
+  sku_id: string;
+  sku_code: string;
+  sku_name: string;
+  product_name: string;
+  warehouse_code: string;
+  type: InventoryTransactionTypeValue;
+  quantity: number;
+  balance_after: number;
+  ref_type: string;
+  ref_id: string;
+  note: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface GetInventoryTransactionsResponse {
+  items: InventoryTransactionDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface GetReceiptsRequest {
+  page?: number;
+  limit?: number;
+  search?: string;
+}
+
+export interface GetReceiptsResponse {
+  items: ReceiptDto[];
+  total: number;
+  page: number;
+  limit: number;
+}
+
+export interface ReconcileStockRequest {
+  sku_ids: string[];
+}
+
+export interface StockDriftDto {
+  sku_id: string;
+  redis_before?: number;
+  expected: number;
+}
+
+export interface ReconcileStockResponse {
+  checked: number;
+  drifts: StockDriftDto[];
+}
+
 export type ReservationStatusValue = 'HOLD' | 'COMMITTED' | 'RELEASED' | 'SHIPPED';
 
 export interface ReservationDto {
@@ -457,6 +551,10 @@ export interface InventoryServiceClient {
   receiveReturn(request: ReceiveReturnRequest): Observable<StockOperationResponse>;
   createReceipt(request: CreateReceiptRequest): Observable<ReceiptDto>;
   adjustStock(request: AdjustStockRequest): Observable<AdjustStockResponse>;
+  getInventoryStocks(request: GetInventoryStocksRequest): Observable<GetInventoryStocksResponse>;
+  getInventoryTransactions(request: GetInventoryTransactionsRequest): Observable<GetInventoryTransactionsResponse>;
+  getReceipts(request: GetReceiptsRequest): Observable<GetReceiptsResponse>;
+  reconcileStock(request: ReconcileStockRequest): Observable<ReconcileStockResponse>;
 }
 
 export const ORDER_PROTO_PATH = getProtoPath('order.proto');
